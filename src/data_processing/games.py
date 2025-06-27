@@ -3,12 +3,16 @@ import numpy as np
 import glob
 import ast
 import re
+import json
 from sklearn.feature_extraction.text import TfidfVectorizer
 
 
 def process_game_data(game_df, details_df):
     # Merge game data with details
-    game_df = game_df.merge(details_df, left_on='appid', right_on='id', how='inner')
+    game_df = game_df[['appid']]
+    game_df = game_df.merge(details_df, left_on='appid', right_on='appid', how='inner')
+
+    print(game_df.columns)
 
     # filter out any records where type != 'game'
     game_df = game_df[game_df['type']=='game']
@@ -50,7 +54,7 @@ def process_game_data(game_df, details_df):
             return x
         else:
             return None
-    game_df['name_x'] = game_df['name_x'].apply(process_name) 
+    game_df['name'] = game_df['name'].apply(process_name) 
 
     # preprocessing about_the_game column
     def process_about_the_game(x):
@@ -88,7 +92,7 @@ def process_game_data(game_df, details_df):
     game_df['publishers'] = game_df['publishers'].apply(process_publishers)
 
     text_cols = [
-        'name_x',
+        'name',
         'about_the_game',
         'developers',
         'categories',
@@ -141,12 +145,61 @@ def process_game_data(game_df, details_df):
     
     print(final_game_df)
     print(final_game_df.shape)
+    print(final_game_df.columns)
 
     return final_game_df
 
+def json_to_df(app_list=None):
+    game_detail_columns = [
+        'steam_appid','name','about_the_game',
+        'achievements','background','background_raw',
+        'capsule_image','capsule_imagev5','categories',
+        'content_descriptors','controller_support','demos',
+        'detailed_description','developers','dlc','drm_notice',
+        'ext_user_account_notice','fullgame','genres',
+        'header_image','is_free','legal_notice',
+        'linux_requirements','mac_requirements',
+        'metacritic','movies','package_groups',
+        'packages','pc_requirements','platforms',
+        'price_overview','publishers','ratings','recommendations',
+        'release_date','required_age','reviews','screenshots',
+        'short_description','support_info','supported_languages',
+        'type','website']
     
+    json_files = glob.glob("../../data/successful_requests/*.json")
+
+    rows = []
+    for i in json_files:
+        if app_list is None or int(i.split("\\")[-1].split(".")[0]) in app_list:
+            with open(i, "r") as f:
+                info_dict = json.load(f)
+            lst = []
+            for col in game_detail_columns:
+                if col in info_dict: lst.append(info_dict[col])
+                else: lst.append(None)
+            rows.append(lst)        
+    df = pd.DataFrame(rows, columns=game_detail_columns)
+
+    # rename steam_appid column
+    df = df.rename(columns={'steam_appid': 'appid'})
+
+    print(df.columns)
+
+    return df    
 
 if __name__ == "__main__":
+    """Processing Top 100 Games Data"""
+    # # get app ids
+    # df = pd.read_csv("../../data/top_100_games.csv")
+    # app_list = df['appid'].tolist()
+    # df = json_to_df(app_list)
+
+    # df.to_csv("../../data/top_100_game_details.csv", index=False)
+
+    # game_df = pd.read_csv("../../data/top_100_games.csv")
+    # game_details_df = pd.read_csv("../../data/top_100_game_details.csv")
+    # process_game_data(game_df, game_details_df)
+
     """Processing Game Data"""
     # game_df = pd.read_csv("../../data/raw_game_data.csv")
     # game_details_df = pd.read_csv("../../data/game_details_sample.csv")
