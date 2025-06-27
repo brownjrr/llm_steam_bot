@@ -230,30 +230,80 @@ if __name__=="__main__":
     app_list_url = "https://api.steampowered.com/ISteamApps/GetAppList/v2/"
     app_detail_url = "http://store.steampowered.com/api/appdetails?appids="
     
-    """Step 1"""
-    # create_raw_apps_table(app_list_url)
+    # """Step 1"""
+    # # create_raw_apps_table(app_list_url)
     
-    """Step 2"""
-    app_list = get_appid_list()
+    # """Step 2"""
+    # app_list = get_appid_list()
     
-    # app_list = app_list[:50000]
-    app_list = app_list[50000:150000]
-    # app_list = app_list[150000:200000]
-    # app_list = app_list[200000:250000]
-    # app_list = app_list[250000:]
+    # # app_list = app_list[:50000]
+    # app_list = app_list[50000:150000]
+    # # app_list = app_list[150000:200000]
+    # # app_list = app_list[200000:250000]
+    # # app_list = app_list[250000:]
 
-    num_chunks = 10
-    chunks = np.array_split(app_list, num_chunks)
+    # num_chunks = 10
+    # chunks = np.array_split(app_list, num_chunks)
 
-    print(f"Num Chunks: {len(chunks)}")
+    # print(f"Num Chunks: {len(chunks)}")
 
-    for i, chunk in enumerate(chunks):
-        # get_game_details(app_detail_url, chunk, i)
-        get_game_details_v2(app_detail_url, chunk, i)
+    # for i, chunk in enumerate(chunks):
+    #     # get_game_details(app_detail_url, chunk, i)
+    #     get_game_details_v2(app_detail_url, chunk, i)
 
-    """Step 3"""
-    # combine_game_details()
+    # """Step 3"""
+    # # combine_game_details()
+
+    """Top 100 Games Data"""
+    # get app ids
+    # df = pd.read_csv("../../data/top_100_games.csv")
+    # app_list = df['appid'].tolist()
+    # get_game_details_v2(app_detail_url, app_list)
+
     
+    """
+    These games are missing from AppList API call. Loading them manually
+    """
+    # app_list = [1089350, 227940, 755790, 901583]
+
+    # # define the number of requests to make per minute
+    # interval = 60 / 40 # we want 40 requests every minute (200 every 5 minutes)
+
+    # for id in app_list:
+    #     # make request
+    #     req = requests.get(app_detail_url+str(id))
+
+    #     # check if request was successful
+    #     try:
+    #         success = req.json()[str(id)]['success']
+    #     except Exception as e:
+    #         print(f"Error: {e}")
+    #         print(f"URL: {app_detail_url+str(id)}")
+    #         print(req)
+    #         print(req.json())
+    #         assert False
+
+        
+    #     # if request was successful, save data to json file
+    #     if success is True and 'data' in req.json()[str(id)]:
+    #         data = req.json()[str(id)]['data']
+
+    #         with open(f"../../data/successful_requests/{id}.json", "w+") as f:
+    #             json.dump(data, f)
+    #     elif success is True and 'data' not in req.json()[str(id)]:
+    #         data = req.json()
+    #         data[str(id)]['status_code'] = req.status_code
+
+    #         with open(f"../../data/no_data_requests/{id}.json", "w+") as f:
+    #             json.dump(data, f)
+    #     elif success is False:
+    #         data = req.json()
+    #         data[str(id)]['status_code'] = req.status_code
+
+    #         with open(f"../../data/failed_requests/{id}.json", "w+") as f:
+    #             json.dump(data, f)
+
+    #     time.sleep(interval)
 
     """TESTING"""
     # df = pd.read_csv("../../data/raw_game_data.csv")
