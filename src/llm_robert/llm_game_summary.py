@@ -146,5 +146,9 @@ if __name__ == "__main__":
     # defining LLM
     llm = get_model()
 
+    # Change this to True if this your first 
+    # time running the summarize_reviews() function
+    populate_vector_store=False
+
     # using LLM to summarize reviews
-    summarize_reviews(review_list, llm=llm)
+    summarize_reviews(review_list, llm=llm, populate_vector_store=populate_vector_store)
