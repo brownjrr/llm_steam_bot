@@ -44,3 +44,5 @@ langchain-chroma==0.2.4
 chromadb==1.0.13
 langchain-huggingface==0.3.0
 sentence-transformers==4.1.0
+dash==2.14.2
+dash-bootstrap-components==2.0.3
