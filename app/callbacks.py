@@ -1,9 +1,14 @@
 import dash
 import dash_bootstrap_components as dbc
 import time
+import sys
+from llm import llm
 from dash import Input, Output, State, callback, html, dcc, Patch, ALL, ctx
 from dash.exceptions import PreventUpdate
 
+sys.path.append("../src/llm_robert/")
+
+from llm_game_summary import invoke_llm
 
 
 def generate_user_message(text):
@@ -84,11 +89,17 @@ def populate_ai_response_bubble(_, message_ids, user_prompt):
     id = user_prompt['id']
 
     # FIXME: Prompt LLM model here
+    response = invoke_llm(
+        llm, 
+        user_prompt['prompt'], 
+        relative_path_to_base="../",
+        relative_path_llm_dir="../src/llm_robert/",
+    )
 
-    # adding wait time for AI Response
-    time.sleep(3)
+    # # adding wait time for AI Response
+    # time.sleep(3)
 
-    response = "<AI GENERATED RESPONSE>"
+    # response = "<AI GENERATED RESPONSE>"
 
     return [
         dcc.Markdown(response) if i['index']==id else dash.no_update 
