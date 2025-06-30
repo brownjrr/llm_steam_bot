@@ -132,7 +132,7 @@ def summarize_reviews(reviews, llm=None, populate_vector_store=False, relative_p
     - Other Features
     - Overall Sentiment
     
-    given the following context from game reviews:
+    given the following context from game reviews (return result as a dictionary with where the required sections are keys and the summary text as values):
     {context}
 
     Question: {question}
@@ -222,16 +222,23 @@ def invoke_llm(model, prompt_str, populate_vector_store=False, relative_path_llm
         relative_path_llm_dir=relative_path_llm_dir
     )
 
-    # print(f"review_summary:\n{review_summary}")
+    print(f"review_summary:\n{review_summary}")
+
+    # final_message = f"""
+    #     Game: {name}
+
+    #     Description: 
+    #     {about_the_game}
+
+    #     Review Summary: 
+    #     {review_summary}
+    # """
 
     final_message = f"""
         Game: {name}
 
         Description: 
         {about_the_game}
-
-        Review Summary: 
-        {review_summary}
     """
 
     return final_message
