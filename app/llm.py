@@ -210,7 +210,7 @@ class SteamBotModel():
             Game: {name}
 
             Description: 
-            {textwrap.fill(about_the_game, width=40)}
+            {about_the_game}
 
             Review Summary: 
             {summary_str}
