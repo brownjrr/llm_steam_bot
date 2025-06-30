@@ -2,12 +2,21 @@ import dash
 import dash_bootstrap_components as dbc
 import time
 import sys
+import os
 from llm import SteamBotModel, get_reviews
 from dash import Input, Output, State, callback, html, dcc, Patch, ALL, ctx
 from dash.exceptions import PreventUpdate
 
 
-llm = SteamBotModel(reviews=get_reviews(550), populate_vector_stores=False)
+def directory_exists(path):
+    return os.path.isdir(path)
+
+if directory_exists("./chroma_langchain_db/"):
+    populate_vector_stores = False
+else:
+    populate_vector_stores = True
+
+llm = SteamBotModel(reviews=get_reviews(550), populate_vector_stores=populate_vector_stores)
 
 def generate_user_message(text):
     return dbc.Card(
@@ -87,6 +96,8 @@ def populate_ai_response_bubble(_, message_ids, user_prompt):
     id = user_prompt['id']
 
     response = llm.invoke(user_prompt['prompt'])
+
+    print(f"response:\n{response}")
 
     return [
         dcc.Markdown(response) if i['index']==id else dash.no_update 

@@ -2,6 +2,9 @@ import sys
 import uuid
 import pandas as pd
 import gzip
+import ast
+import re
+import textwrap
 from io import BytesIO
 from pydantic import BaseModel
 from annotated_types import Annotated
@@ -12,6 +15,8 @@ from langchain_core.documents import Document
 from langchain.document_loaders import CSVLoader
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough, RunnableLambda
+from langchain_aws.function_calling import ToolsOutputParser
+from langchain_core.output_parsers import PydanticOutputParser
 
 sys.path.append("../src/llm_robert/")
 from llm_game_summary import get_model
@@ -35,6 +40,10 @@ class SteamBotModel():
         self.reviews = reviews
         self.embeddings = HuggingFaceEmbeddings()
         self.populate_vector_stores = populate_vector_stores
+
+        # And we'll create a bound version that knows about the postal address tool
+        self.game_summary = self.llm.bind_tools([ReviewSummary])
+        self.tools_parser = ToolsOutputParser(pydantic_schemas=[ReviewSummary])
 
         # creating retrievers
         self.review_retriever = self.get_review_retriever(self.reviews)
@@ -129,14 +138,28 @@ class SteamBotModel():
 
         # Creating prompt
         prompt = ChatPromptTemplate.from_template(template)
+        
+        def convert_to_json(sentence: str):
+            sent = sentence.content.strip()
+            return ast.literal_eval(sent)
+        
+        chain = {"context": self.review_retriever, "question": RunnablePassthrough()} | prompt | self.llm | RunnableLambda(convert_to_json)
 
-        # defining chain
-        chain = {"context": self.review_retriever, "question": RunnablePassthrough()} | prompt | self.llm
-
+        print("Invoking to get game summary")
         # Asking questions
         response = chain.invoke("Can you give a summary of the game reviews in paragraph form?")
 
-        return response.content
+        # print(f"response:\n{response}")
+
+        # return response.content
+        return response
+
+    def verify(self, msg):
+        print(f"Verifying message {msg}")
+        if len(msg.tool_calls) <= 0:
+            print("No tools were used in the chain, raising Exception")
+            raise Exception("No tools were used in the chain")
+        return msg
 
     def invoke(self, user_prompt):
         """Finding App ID of game referenced by user"""
@@ -152,14 +175,14 @@ class SteamBotModel():
 
         def extract_appid(ai_message):
             return int(ai_message.content.strip())
-    
+        
         # defining chain
         app_id_chain = {"context": self.game_data_retriever, "prompt": RunnablePassthrough()} | prompt | self.llm | RunnableLambda(extract_appid)
 
         # Asking questions
         appid = app_id_chain.invoke(user_prompt)
 
-        # print(f"App ID: {appid}")
+        print(f"App ID: {appid}")
 
         # get description
         game_details_df = pd.read_csv(f"../data/top_100_game_details.csv")
@@ -173,28 +196,24 @@ class SteamBotModel():
         # getting game description
         about_the_game = game_details_df['about_the_game'].values[0]
 
-        # print(f"about_the_game:\n{about_the_game}")
+        def remove_html_tags(text):
+            clean_text = re.sub(r'<.*?>', '', text)
+            return clean_text
+        
+        about_the_game = remove_html_tags(about_the_game)
 
         # using LLM to summarize reviews
         review_summary = self.summarize_reviews()
-
-        print(f"review_summary:\n{review_summary}")
-
-        # final_message = f"""
-        #     Game: {name}
-
-        #     Description: 
-        #     {about_the_game}
-
-        #     Review Summary: 
-        #     {review_summary}
-        # """
+        summary_str = "\n\t\t".join([f"{i}:\n\t\t\t{review_summary[i]}" for i in review_summary])
 
         final_message = f"""
             Game: {name}
 
             Description: 
-            {about_the_game}
+            {textwrap.fill(about_the_game, width=40)}
+
+            Review Summary: 
+            {summary_str}
         """
 
         return final_message
