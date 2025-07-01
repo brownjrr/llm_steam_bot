@@ -3,20 +3,12 @@ import dash_bootstrap_components as dbc
 import time
 import sys
 import os
-from llm import SteamBotModel, get_reviews
+from llm import SteamBotModel, get_reviews, get_model
 from dash import Input, Output, State, callback, html, dcc, Patch, ALL, ctx
 from dash.exceptions import PreventUpdate
 
 
-def directory_exists(path):
-    return os.path.isdir(path)
-
-if directory_exists("./chroma_langchain_db/"):
-    populate_vector_stores = False
-else:
-    populate_vector_stores = True
-
-llm = SteamBotModel(reviews=get_reviews(550), populate_vector_stores=populate_vector_stores)
+llm = SteamBotModel(llm=get_model())
 
 def generate_user_message(text):
     return dbc.Card(
@@ -60,11 +52,12 @@ def generate_ai_loading_message(prompt_id):
     Output("last_user_prompt", "data"),
     Output("user-prompt-input", "value"),
     Input("submit-prompt-button", "n_clicks"),
+    Input("user-prompt-input", "n_submit"),
     State("user-prompt-input", "value"),
     prevent_initial_call=True,
 )
-def add_user_response(n, prompt):
-    if n and prompt is not None and prompt != "":
+def add_user_response(n, n_sub, prompt):
+    if (n_sub or n) and prompt is not None and prompt != "":
         patched = Patch()
         patched.append(generate_user_message(prompt))
         return patched, {'prompt': prompt, 'id': n}, None
