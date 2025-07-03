@@ -9,8 +9,9 @@ import textwrap
 import json
 import pickle
 import Levenshtein
+import textwrap
 from io import BytesIO
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from annotated_types import Annotated
 from langchain_aws.chat_models import ChatBedrockConverse
 from langchain_huggingface.embeddings import HuggingFaceEmbeddings
@@ -22,6 +23,8 @@ from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 from langchain_aws.function_calling import ToolsOutputParser
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.load import dumpd, load, loads
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+import os
 
 
 def get_reviews(app_id=None):
@@ -48,26 +51,32 @@ def get_model():
 
     return llm
 
+# Pydantic
+desc_beginning = "A short description of what the reviews say about"
+
+class GameReviewSummary(BaseModel):
+    """Game Review Summary to return to user"""
+    audience: str = Field(description="A short description of the target audience for this game.")
+    graphics: str = Field(description=f"{desc_beginning} the game's graphics")
+    quality: str = Field(description=f"{desc_beginning} the game's quality")
+    requirements: str = Field(description=f"{desc_beginning} the game's system requirements")
+    difficulty: str = Field(description=f"{desc_beginning} the game's difficulty")
+    game_length: str = Field(description=f"{desc_beginning} the game's length")
+    story: str = Field(description=f"{desc_beginning} the game's story")
+    bugs: str = Field(description=f"{desc_beginning} bugs in the game")
+    # other_features: str = Field(description=f"{desc_beginning} any other features")
+    sentiment: str = Field(description=f"A short description of the overall sentiment of the game, based on reviews")
+
 class SteamBotModel():
     def __init__(self, llm=None, reviews=None, populate_vector_stores=False):
         self.llm = llm
     
     def summarize_reviews(self, appid):
         # Defining prompt template
-        template = """For each summary asked for, provide information (separated in paragraphs) about 
-
-        - Target Audience
-        - Graphics
-        - Quality
-        - Requirements
-        - Difficulty
-        - Game Time/Length
-        - Story
-        - Bugs
-        - Other Features
-        - Overall Sentiment
-        
-        given the following context from game reviews (return result as a dictionary with where the required sections are keys and the summary text as values):
+        template = """Use the following context from game reviews, answer the 
+        question (Respond in JSON with `Target Audience`, `Graphics`, `Quality`,
+        `Requirements`, `Difficulty`, `Game Time/Length`, `Story`, `Bugs`, 
+        `Other Features`, `Sentiment` keys):
         {context}
 
         Question: {question}
@@ -76,18 +85,24 @@ class SteamBotModel():
         # Creating prompt
         prompt = ChatPromptTemplate.from_template(template)
         
-        def convert_to_json(sentence: str):
-            sent = sentence.content.strip()
-            return ast.literal_eval(sent)
+        def process_game_summary_review(game_summary_review) -> str:
+            ret_str = ""
+            
+            for i in game_summary_review.__fields__.keys():
+                content = '\n\t\t\t  '.join(textwrap.wrap(getattr(game_summary_review, i), width=100))
+                ret_str += f"\t{i.upper().replace('_', ' ')}:\n\t\t\t* {content}\n\t"
+            
+            return ret_str
         
-        retriever = get_review_retriever(get_reviews(), skip_populating=True)
+        retriever = get_review_retriever(get_reviews(), skip_populating=True, filter_app_id=str(appid))
 
-        chain = {"context": retriever, "question": RunnablePassthrough()} | prompt | self.llm | RunnableLambda(convert_to_json) 
+        chain = {"context": retriever, "question": RunnablePassthrough()} | prompt | self.llm.with_structured_output(GameReviewSummary) | RunnableLambda(process_game_summary_review)
 
-        print("Invoking to get game summary")
+        print(f"Invoking to get game review summary (appid={appid})")
 
         # Asking questions
-        response = chain.invoke("Can you give a summary of the game reviews in paragraph form?", filter={"source": appid})
+        # response = chain.invoke("Can you give a summary of the game reviews in paragraph form?", filter={"source": appid})
+        response = chain.invoke("Can you give a summary of the game reviews in paragraph form?")
 
         return response
 
@@ -121,11 +136,13 @@ class SteamBotModel():
         game_name = game_name_chain.invoke(user_prompt)
 
         # find the most similar game in our dataset
-        game_details_df = pd.read_csv(f"../data/top_100_game_details.csv")
+        games_df = pd.read_csv(f"../data/top_100_games.csv")
 
-        game_details_df['similarity_score'] = game_details_df['name'].apply(lambda x: Levenshtein.ratio(game_name, re.sub(r'[^\w\s]', '', x.lower())))
+        print(games_df)
 
-        sim_df = game_details_df[['appid', 'name', 'similarity_score']].sort_values(
+        games_df['similarity_score'] = games_df['name'].apply(lambda x: Levenshtein.ratio(game_name, re.sub(r'[^\w\s]', '', x.lower())))
+
+        sim_df = games_df[['appid', 'name', 'similarity_score']].sort_values(
             by=['similarity_score'], 
             ascending=False
         )
@@ -138,6 +155,8 @@ class SteamBotModel():
             appid = None
 
         print(f"App ID: {appid}")
+
+        game_details_df = pd.read_csv(f"../data/top_100_game_details.csv")
         
         # filter by appid
         game_details_df = game_details_df[game_details_df['appid']==appid]
@@ -149,24 +168,26 @@ class SteamBotModel():
         about_the_game = game_details_df['about_the_game'].values[0]
 
         def remove_html_tags(text):
-            clean_text = re.sub(r'<.*?>', '', text)
+            clean_text = re.sub(r'<.*?>', '', text).strip()
             return clean_text
         
         about_the_game = remove_html_tags(about_the_game)
 
         # using LLM to summarize reviews
         review_summary = self.summarize_reviews(appid)
-        summary_str = "\n\t\t".join([f"{i}:\n\t\t\t{review_summary[i]}" for i in review_summary])
 
-        final_message = f"""
-            Game: {name}
+        # wrapping description
+        about_the_game = "\n\t\t".join(textwrap.wrap("\t"+about_the_game, width=100))
 
-            Description: 
-            {about_the_game}
+        final_message = f'''
+        **Game:** {name}
+        
+        **Description:**
+        {about_the_game}
 
-            Review Summary: 
-            {summary_str}
-        """
+        **Review Summary:**
+        {review_summary}
+        '''
 
         return final_message
 
@@ -184,7 +205,7 @@ class ReviewSummary(BaseModel):
     other: Annotated[str, "A short summary of any other important important information offered by the reviews"]
     overall_sentiment: Annotated[str, "A short summary of the overall sentiment of the game"]
 
-def get_review_retriever(reviews, skip_populating=False):
+def get_review_retriever(reviews, skip_populating=False, filter_app_id=None):
     print("Grabbing Review Retriever")
 
     embeddings = HuggingFaceEmbeddings()
@@ -193,32 +214,43 @@ def get_review_retriever(reviews, skip_populating=False):
     vector_store = Chroma(
         collection_name="reviews",
         embedding_function=embeddings,
-        persist_directory=f"../src/llm_robert/chroma_langchain_db",
+        persist_directory=f"./chroma_langchain_db/{filter_app_id}/",
     )
 
     if not skip_populating:
-        documents = []
-
         # Create documents from reviews
         for idx, (appid, content) in enumerate(reviews):
             if idx % 5000 == 0:
                 print(idx)
 
-            documents.append(
-                Document(
-                    page_content=content,
-                    id=idx,
-                    metadata={"source": appid},
-                )
+            recursive_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=5000, chunk_overlap=50
             )
 
-        # adding documents to vector store
-        uuids = [str(uuid.uuid4()) for _ in range(len(documents))]
-        vector_store.add_documents(documents=documents, ids=uuids)
+            recursive_splits = recursive_splitter.split_text(content)
 
-    print("transforming chroma vectorsotre into a retriever")
+            documents = []
+
+            for chunk_num, chunk in enumerate(recursive_splits):
+                documents.append(
+                    Document(
+                        page_content=content,
+                        id=idx,
+                        metadata={"source": appid, "chunk_num": chunk_num, "review_id":idx},
+                    )
+                )
+            
+            # adding documents to vector store
+            uuids = [str(uuid.uuid4()) for _ in range(len(documents))]
+
+            print(f"adding documents [idx={idx}]")
+            vector_store.add_documents(documents=documents, ids=uuids)
+
     # transforming chroma vectorsotre into a retriever
-    retriever = vector_store.as_retriever()
+    if filter_app_id:
+        retriever = vector_store.as_retriever()
+    else:
+        retriever = vector_store.as_retriever()
 
     print("Finished Grabbing Review Retriever")
 
@@ -233,7 +265,7 @@ def get_game_data_retriever(skip_populating=False):
     vector_store = Chroma(
         collection_name="game_data",
         embedding_function=embeddings,
-        persist_directory=f"../src/llm_robert/chroma_langchain_db",
+        persist_directory=f"./chroma_langchain_db",
     )
 
     if not skip_populating:
@@ -260,6 +292,52 @@ def get_game_data_retriever(skip_populating=False):
     print("Finished Grabbing Game Data Retriever")
 
     return retriever
+
+def create_review_vector_stores(reviews):
+    print("Grabbing Review Retriever")
+
+    embeddings = HuggingFaceEmbeddings()
+
+    # grouping reviews by appid
+    get_app_review_dict = {}
+    for i in reviews:
+        if i[0] in get_app_review_dict:
+            get_app_review_dict[i[0]].append(i[1])
+        else:
+            get_app_review_dict[i[0]] = [i[1]]
+    
+    # Get all subdirectories under ./chroma_langchain_db/
+    chroma_db_dir = "./chroma_langchain_db/"
+    subdirs = [d for d in os.listdir(chroma_db_dir) if os.path.isdir(os.path.join(chroma_db_dir, d))]
+    print("Subdirectories under ./chroma_langchain_db/:", subdirs)
+    
+    # for appid, reviews in get_app_review_dict.items():
+    #     print(f"APPID: {appid}")
+
+    #     # defining vector store
+    #     vector_store = Chroma(
+    #         collection_name="reviews",
+    #         embedding_function=embeddings,
+    #         persist_directory=f"./chroma_langchain_db/{appid}/",
+    #     )
+
+    #     for idx, content in enumerate(reviews):
+    #         if idx % 5000 == 0:
+    #             print(idx)
+
+    #         doc = Document(
+    #             page_content=content,
+    #             id=idx,
+    #             metadata={"source": appid},
+    #         )
+
+    #         documents = [doc]
+
+    #         # adding documents to vector store
+    #         uuids = [str(uuid.uuid4()) for _ in range(len(documents))]
+
+    #         print(f"adding documents [idx={idx}]")
+    #         vector_store.add_documents(documents=documents, ids=uuids)
 
 def create_and_save_app_id_chain(llm):
     """Finding App ID of game referenced by user"""

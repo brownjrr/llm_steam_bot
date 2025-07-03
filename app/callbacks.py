@@ -58,9 +58,14 @@ def generate_ai_loading_message(prompt_id):
 )
 def add_user_response(n, n_sub, prompt):
     if (n_sub or n) and prompt is not None and prompt != "":
+        # calculating id of user_prompt
+        if n_sub is None: n_sub = 0
+        if n is None: n = 0
+        id = n + n_sub
+
         patched = Patch()
         patched.append(generate_user_message(prompt))
-        return patched, {'prompt': prompt, 'id': n}, None
+        return patched, {'prompt': prompt, 'id': id}, None
     
     raise PreventUpdate
 
@@ -90,7 +95,7 @@ def populate_ai_response_bubble(_, message_ids, user_prompt):
 
     response = llm.invoke(user_prompt['prompt'])
 
-    print(f"response:\n{response}")
+    # print(f"response:\n{response}")
 
     return [
         dcc.Markdown(response) if i['index']==id else dash.no_update 
