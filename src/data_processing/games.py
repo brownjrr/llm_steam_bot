@@ -5,14 +5,13 @@ import ast
 import re
 import json
 from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.preprocessing import normalize
 
 
-def process_game_data(game_df, details_df):
+def process_game_data(game_df, details_df, verbose=False):
     # Merge game data with details
     game_df = game_df[['appid']]
     game_df = game_df.merge(details_df, left_on='appid', right_on='appid', how='inner')
-
-    print(game_df.columns)
 
     # filter out any records where type != 'game'
     game_df = game_df[game_df['type']=='game']
@@ -137,15 +136,22 @@ def process_game_data(game_df, details_df):
     vectorizer = TfidfVectorizer()
     text_vec_df = pd.DataFrame(vectorizer.fit_transform(game_df['text']).toarray())
 
+    # create df from numeric cols
+    num_df = game_df[numeric_cols].fillna(0)
+
+    num_df['is_free'] = num_df['is_free'].astype(int)
+    num_df = pd.DataFrame(normalize(num_df), columns=num_df.columns)
+
     # concatenate text_vec_df with numeric cols
     final_game_df = pd.DataFrame(
-        data=np.hstack([game_df[numeric_cols], text_vec_df]),
+        data=np.hstack([num_df, text_vec_df]),
         columns=numeric_cols+list(text_vec_df.columns)
     )
     
-    print(final_game_df)
-    print(final_game_df.shape)
-    print(final_game_df.columns)
+    if verbose:
+        print(final_game_df)
+        print(final_game_df.shape)
+        print(final_game_df.columns)
 
     return final_game_df
 

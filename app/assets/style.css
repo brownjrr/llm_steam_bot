@@ -1,0 +1,23 @@
+.main-menu-icon{
+    font-size: 200%;
+    text-align: center;
+}
+
+.main-menu-hr{
+    width: 100%;
+    align-self: auto;
+}
+
+.header_title_text{
+    color: aliceblue;
+    font-size: 300%;
+    font-weight: bolder;
+    white-space: nowrap;
+}
+
+.header_about_text{
+    color: aliceblue;
+    font-size: 175%;
+    font-weight: normal;
+    white-space: nowrap;
+}
