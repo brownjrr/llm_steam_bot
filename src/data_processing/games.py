@@ -137,15 +137,16 @@ def process_game_data(game_df, details_df, verbose=False):
     text_vec_df = pd.DataFrame(vectorizer.fit_transform(game_df['text']).toarray())
 
     # create df from numeric cols
-    num_df = game_df[numeric_cols].fillna(0)
+    num_df = game_df[['appid']+numeric_cols].fillna(0).set_index("appid")
 
     num_df['is_free'] = num_df['is_free'].astype(int)
-    num_df = pd.DataFrame(normalize(num_df), columns=num_df.columns)
+    num_df = pd.DataFrame(normalize(num_df), columns=num_df.columns, index=num_df.index)
 
     # concatenate text_vec_df with numeric cols
     final_game_df = pd.DataFrame(
         data=np.hstack([num_df, text_vec_df]),
-        columns=numeric_cols+list(text_vec_df.columns)
+        columns=numeric_cols+list(text_vec_df.columns),
+        index=num_df.index
     )
     
     if verbose:
