@@ -1,1 +1,4 @@
 .venv/
+data/top_100_game_reviews.csv
+src/llm/fine_tuned_model/
+src/llm/results/
