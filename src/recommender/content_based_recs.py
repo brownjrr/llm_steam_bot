@@ -33,14 +33,11 @@ def content_based_recommendation(appid, X, similarity_method=None, top_n=10):
     app_row = app_similarities[:1]
     app_similarities = app_similarities[1:]
 
-    print(app_row)
-    print()
-    print(app_similarities)
-
+    return app_similarities
 
 if __name__ == "__main__":
     game_df = pd.read_csv("../../data/top_100_games.csv")
     game_details_df = pd.read_csv("../../data/top_100_game_details.csv")
-    df = process_game_data(game_df, game_details_df, verbose=False)
+    df = process_game_data(game_df, game_details_df, verbose=False, include_image_summary=True)
 
     content_based_recommendation(70, df, similarity_method='cosine')

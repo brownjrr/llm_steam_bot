@@ -10,6 +10,7 @@ import json
 import pickle
 import Levenshtein
 import textwrap
+import os
 from io import BytesIO
 from pydantic import BaseModel, Field
 from annotated_types import Annotated
@@ -24,7 +25,7 @@ from langchain_aws.function_calling import ToolsOutputParser
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.load import dumpd, load, loads
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-import os
+from langchain_core.tools import tool
 
 
 def get_reviews(app_id=None):
