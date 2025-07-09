@@ -52,7 +52,7 @@ def get_model():
     return llm
 
 # Pydantic
-desc_beginning = "A short description of what the reviews say about"
+desc_beginning = "A few unique sentences of what the reviews say about"
 
 class GameReviewSummary(BaseModel):
     """Game Review Summary to return to user"""
@@ -74,9 +74,9 @@ class SteamBotModel():
     def summarize_reviews(self, appid):
         # Defining prompt template
         template = """Use the following context from game reviews, answer the 
-        question (Respond in JSON with `Target Audience`, `Graphics`, `Quality`,
+        question (Respond in JSON with several different and unique thoughts about the `Target Audience`, `Graphics`, `Quality`,
         `Requirements`, `Difficulty`, `Game Time/Length`, `Story`, `Bugs`, 
-        `Other Features`, `Sentiment` keys):
+        `Other Features`, `Sentiment` keys that each have something different and interesting to say):
         {context}
 
         Question: {question}
@@ -86,11 +86,13 @@ class SteamBotModel():
         prompt = ChatPromptTemplate.from_template(template)
         
         def process_game_summary_review(game_summary_review) -> str:
+            print(game_summary_review)
             ret_str = ""
-            
-            for i in game_summary_review.__fields__.keys():
-                content = '\n\t\t\t  '.join(textwrap.wrap(getattr(game_summary_review, i), width=100))
-                ret_str += f"\t{i.upper().replace('_', ' ')}:\n\t\t\t* {content}\n\t"
+            emojis = ["🎯", "🎨", "✅", "💻", "🎮", "⏱️", "📚", "🐞", "💬"]
+            for index, key in enumerate(game_summary_review.__fields__.keys()):
+
+                content = textwrap.fill(getattr(game_summary_review, key), width=100)
+                ret_str += f"**{emojis[index]} {key.upper().replace('_', ' ')}**  \n* {content}\n\n"
             
             return ret_str
         
@@ -177,17 +179,24 @@ class SteamBotModel():
         review_summary = self.summarize_reviews(appid)
 
         # wrapping description
-        about_the_game = "\n\t\t".join(textwrap.wrap("\t"+about_the_game, width=100))
+        about_the_game = textwrap.fill(about_the_game, width=100)
 
-        final_message = f'''
-        **Game:** {name}
-        
-        **Description:**
-        {about_the_game}
+        # this must be indented all the way to the left or it will not render correctly
+        final_message = f"""
+## 🎮 **Game**  
+{str(name)}
 
-        **Review Summary:**
-        {review_summary}
-        '''
+---
+
+## 📖 **Description**  
+{about_the_game}
+
+---
+
+## 📝 **Review Summary**  
+
+{review_summary}
+        """
 
         return final_message
 
