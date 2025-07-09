@@ -86,7 +86,6 @@ class SteamBotModel():
         prompt = ChatPromptTemplate.from_template(template)
         
         def process_game_summary_review(game_summary_review) -> str:
-            print(game_summary_review)
             ret_str = ""
             emojis = ["🎯", "🎨", "✅", "💻", "🎮", "⏱️", "📚", "🐞", "💬"]
             for index, key in enumerate(game_summary_review.__fields__.keys()):
@@ -154,7 +153,18 @@ class SteamBotModel():
         if sim_df['similarity_score'].values[0] > 0.7:
             appid = sim_df['appid'].values[0]
         else:
-            appid = None
+            similar_game_list = ''.join(f'- **{game}**\n' for game in sim_df['name'].head(5).tolist())
+            
+            return f"""
+## 🎮 Game Not Found  
+We couldn't find the game you were looking for based on your prompt.
+
+Here are 5 games we do have that may be similar to your prompt:
+
+---
+
+{similar_game_list}
+"""
 
         print(f"App ID: {appid}")
 
