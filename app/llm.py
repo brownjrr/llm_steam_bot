@@ -25,8 +25,42 @@ from langchain_aws.function_calling import ToolsOutputParser
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.load import dumpd, load, loads
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_core.tools import tool
+from langchain_core.tools import tool, InjectedToolArg
+from langgraph.prebuilt import create_react_agent
+from langchain_core.messages import ToolMessage
+from sklearn.metrics.pairwise import cosine_similarity
 
+sys.path.append("../src/data_processing/")
+
+from games import process_game_data
+
+def content_based_recommendation(appid, X, similarity_method=None, top_n=10):
+    if similarity_method is None or similarity_method not in ['cosine']:
+        assert False, "This function is not capable of handling this similarity method"
+
+    if similarity_method == 'cosine':
+        sim_df = pd.DataFrame(cosine_similarity(X), columns=X.index, index=X.index)
+    
+    # get similarities for appid, sort by similarity score
+    app_similarities = sim_df[appid].sort_values(ascending=False)
+
+    # grab top n apps
+    app_similarities = app_similarities[:1+top_n].to_frame()
+
+    # change name
+    app_similarities.columns = ["score"]
+
+    app_similarities = app_similarities.reset_index()
+
+    # get app names
+    game_df = pd.read_csv("../data/top_100_games.csv")[['appid', 'name']]
+    app_similarities = app_similarities.merge(game_df, on=['appid'], how='inner')
+
+    # separate app row from suggestion rows
+    app_row = app_similarities[:1]
+    app_similarities = app_similarities[1:]
+
+    return app_similarities
 
 def get_reviews(app_id=None):
     # Open and read a .gz file
@@ -52,6 +86,103 @@ def get_model():
 
     return llm
 
+def summarize_reviews(appid, llm):
+    # Defining prompt template
+    template = """Use the following context from game reviews, answer the 
+    question (Respond in JSON with `Target Audience`, `Graphics`, `Quality`,
+    `Requirements`, `Difficulty`, `Game Time/Length`, `Story`, `Bugs`, 
+    `Other Features`, `Sentiment` keys):
+    {context}
+
+    Question: {question}
+    """
+
+    # Creating prompt
+    prompt = ChatPromptTemplate.from_template(template)
+    
+    def process_game_summary_review(game_summary_review) -> str:
+        ret_str = ""
+        
+        for i in game_summary_review.__fields__.keys():
+            content = '\n\t\t\t  '.join(textwrap.wrap(getattr(game_summary_review, i), width=100))
+            ret_str += f"\t{i.upper().replace('_', ' ')}:\n\t\t\t* {content}\n\t"
+        
+        return ret_str
+    
+    retriever = get_review_retriever(get_reviews(), skip_populating=True, filter_app_id=str(appid))
+
+    chain = {"context": retriever, "question": RunnablePassthrough()} | prompt | llm.with_structured_output(GameReviewSummary) | RunnableLambda(process_game_summary_review)
+
+    print(f"Invoking to get game review summary (appid={appid})")
+
+    # Asking questions
+    # response = chain.invoke("Can you give a summary of the game reviews in paragraph form?", filter={"source": appid})
+    response = chain.invoke("Can you give a summary of the game reviews in paragraph form?")
+
+    return response
+    
+@tool("get_game_info")
+def get_game_info(appid: int):
+    """
+    A tool which returns information related to a video game on Steam.
+
+    Examples:
+    1. If the user asks about the game "Left 4 Dead 2" and you find this game's 
+    appid to be 550, you would specify the appid as 550
+    """
+    game_details_df = pd.read_csv(f"../data/top_100_game_details.csv")
+    
+    # filter by appid
+    game_details_df = game_details_df[game_details_df['appid']==appid]
+
+    # getting game name
+    name = game_details_df['name'].values[0]
+
+    # getting game description
+    about_the_game = game_details_df['about_the_game'].values[0]
+
+    def remove_html_tags(text):
+        clean_text = re.sub(r'<.*?>', '', text).strip()
+        return clean_text
+    
+    about_the_game = remove_html_tags(about_the_game)
+
+    # using LLM to summarize reviews
+    review_summary = summarize_reviews(appid, get_model())
+
+    # wrapping description
+    about_the_game = "\n\t\t".join(textwrap.wrap("\t"+about_the_game, width=100))
+
+    final_message = f'''
+    **Game:** {name}
+    
+    **Description:**
+    {about_the_game}
+
+    **Review Summary:**
+    {review_summary}
+    '''
+
+    return final_message
+
+@tool("get_game_recommendation")
+def get_game_recommendation(appid: int):
+    """
+    A tool which returns recommendations based on a given video game.
+
+    Examples:
+    1. If the user asks for recommendations based on the game "Left 4 Dead 2" 
+    and you find this game's appid to be 550, you would specify the appid as 550
+    """
+    game_df = pd.read_csv("../data/top_100_games.csv")
+    game_details_df = pd.read_csv("../data/top_100_game_details.csv")
+    img_summary_df = pd.read_csv("../data/top_100_game_image_summary.csv")
+    
+    df = process_game_data(game_df, game_details_df, img_summary_df=img_summary_df, verbose=False, include_image_summary=True)
+    recs_df = content_based_recommendation(appid, df, similarity_method='cosine')
+
+    return recs_df
+
 # Pydantic
 desc_beginning = "A short description of what the reviews say about"
 
@@ -71,126 +202,141 @@ class GameReviewSummary(BaseModel):
 class SteamBotModel():
     def __init__(self, llm=None, reviews=None, populate_vector_stores=False):
         self.llm = llm
-    
-    def summarize_reviews(self, appid):
-        # Defining prompt template
-        template = """Use the following context from game reviews, answer the 
-        question (Respond in JSON with `Target Audience`, `Graphics`, `Quality`,
-        `Requirements`, `Difficulty`, `Game Time/Length`, `Story`, `Bugs`, 
-        `Other Features`, `Sentiment` keys):
-        {context}
-
-        Question: {question}
-        """
-
-        # Creating prompt
-        prompt = ChatPromptTemplate.from_template(template)
-        
-        def process_game_summary_review(game_summary_review) -> str:
-            ret_str = ""
-            
-            for i in game_summary_review.__fields__.keys():
-                content = '\n\t\t\t  '.join(textwrap.wrap(getattr(game_summary_review, i), width=100))
-                ret_str += f"\t{i.upper().replace('_', ' ')}:\n\t\t\t* {content}\n\t"
-            
-            return ret_str
-        
-        retriever = get_review_retriever(get_reviews(), skip_populating=True, filter_app_id=str(appid))
-
-        chain = {"context": retriever, "question": RunnablePassthrough()} | prompt | self.llm.with_structured_output(GameReviewSummary) | RunnableLambda(process_game_summary_review)
-
-        print(f"Invoking to get game review summary (appid={appid})")
-
-        # Asking questions
-        # response = chain.invoke("Can you give a summary of the game reviews in paragraph form?", filter={"source": appid})
-        response = chain.invoke("Can you give a summary of the game reviews in paragraph form?")
-
-        return response
-
-    def verify(self, msg):
-        print(f"Verifying message {msg}")
-        if len(msg.tool_calls) <= 0:
-            print("No tools were used in the chain, raising Exception")
-            raise Exception("No tools were used in the chain")
-        return msg
 
     def invoke(self, user_prompt):
         """Finding name of game referenced by user"""
+
         template = """
-            Get the name of the game mentioned in the following prompt:
+            Return the name of the game(s) mentioned in the following prompt:
 
             Prompt: {prompt}
 
-            Return the results as a single Python string, with no other text
+            Return as List of Strings, with no other text
         """
 
-        # Creating prompt
-        prompt = ChatPromptTemplate.from_template(template)
+        def extract_names_str(ai_message):
+            return json.loads(ai_message.content)
+        
+        # retriever = get_game_id_retriever(skip_populating=True)
+        retriever = get_game_data_retriever(skip_populating=True)
 
-        def extract_name_str(ai_message):
-            return re.sub(r'[^\w\s]', '', ai_message.content.strip().lower())
-
-        # defining chain
-        game_name_chain = {"prompt": RunnablePassthrough()} | prompt | self.llm | RunnableLambda(extract_name_str)
-
-        # Asking questions
-        game_name = game_name_chain.invoke(user_prompt)
-
-        # find the most similar game in our dataset
-        games_df = pd.read_csv(f"../data/top_100_games.csv")
-
-        print(games_df)
-
-        games_df['similarity_score'] = games_df['name'].apply(lambda x: Levenshtein.ratio(game_name, re.sub(r'[^\w\s]', '', x.lower())))
-
-        sim_df = games_df[['appid', 'name', 'similarity_score']].sort_values(
-            by=['similarity_score'], 
-            ascending=False
+        game_name_chain = (
+            {"prompt": RunnablePassthrough()}
+            | ChatPromptTemplate.from_template(template)
+            | self.llm 
+            | RunnableLambda(extract_names_str)
         )
 
-        print(sim_df)
+        appid_chain = (
+            {"context": retriever, "game": RunnablePassthrough()}
+            | ChatPromptTemplate.from_template(
+                "Return the `appid` of game '{game}' given the following context: {context}" \
+                "\n\nReturn answer as a JSON dictionary with keys `name` and `appid`"
+            )
+            | self.llm
+            | RunnableLambda(extract_names_str)
+        )
+
+        # Asking questions
+        response = (game_name_chain | appid_chain.map()).invoke(user_prompt)
         
-        if sim_df['similarity_score'].values[0] > 0.7:
-            appid = sim_df['appid'].values[0]
-        else:
-            appid = None
-
-        print(f"App ID: {appid}")
-
-        game_details_df = pd.read_csv(f"../data/top_100_game_details.csv")
+        print(f"response: {response}")
         
-        # filter by appid
-        game_details_df = game_details_df[game_details_df['appid']==appid]
+        for game in response:
+            agent = create_react_agent(self.llm, [get_game_info, get_game_recommendation])
 
-        # getting game name
-        name = game_details_df['name'].values[0]
+            system_message = {"role": "system", "content": f"The game that this user mentions has an appid={game['appid']}"}
+            input_message = {"role": "user", "content": user_prompt}
+            agent_response = agent.invoke({
+                "messages": [system_message, input_message],
+            })
 
-        # getting game description
-        about_the_game = game_details_df['about_the_game'].values[0]
+            for message in agent_response['messages']:
+                if isinstance(message, ToolMessage):
+                    if message.name in ["get_game_info"]:
+                        response = message.content
+                        break
+            response = agent_response['messages'][-1].content
 
-        def remove_html_tags(text):
-            clean_text = re.sub(r'<.*?>', '', text).strip()
-            return clean_text
+        return response
+    
+    # def invoke(self, user_prompt):
+    #     """Finding name of game referenced by user"""
+    #     template = """
+    #         Get the name of the game mentioned in the following prompt:
+
+    #         Prompt: {prompt}
+
+    #         Return the results as a single Python string, with no other text
+    #     """
+
+    #     # Creating prompt
+    #     prompt = ChatPromptTemplate.from_template(template)
+
+    #     def extract_name_str(ai_message):
+    #         return re.sub(r'[^\w\s]', '', ai_message.content.strip().lower())
+
+    #     # defining chain
+    #     game_name_chain = {"prompt": RunnablePassthrough()} | prompt | self.llm | RunnableLambda(extract_name_str)
+
+    #     # Asking questions
+    #     game_name = game_name_chain.invoke(user_prompt)
+
+    #     # find the most similar game in our dataset
+    #     games_df = pd.read_csv(f"../data/top_100_games.csv")
+
+    #     print(games_df)
+
+    #     games_df['similarity_score'] = games_df['name'].apply(lambda x: Levenshtein.ratio(game_name, re.sub(r'[^\w\s]', '', x.lower())))
+
+    #     sim_df = games_df[['appid', 'name', 'similarity_score']].sort_values(
+    #         by=['similarity_score'], 
+    #         ascending=False
+    #     )
+
+    #     print(sim_df)
         
-        about_the_game = remove_html_tags(about_the_game)
+    #     if sim_df['similarity_score'].values[0] > 0.7:
+    #         appid = sim_df['appid'].values[0]
+    #     else:
+    #         appid = None
 
-        # using LLM to summarize reviews
-        review_summary = self.summarize_reviews(appid)
+    #     print(f"App ID: {appid}")
 
-        # wrapping description
-        about_the_game = "\n\t\t".join(textwrap.wrap("\t"+about_the_game, width=100))
-
-        final_message = f'''
-        **Game:** {name}
+    #     game_details_df = pd.read_csv(f"../data/top_100_game_details.csv")
         
-        **Description:**
-        {about_the_game}
+    #     # filter by appid
+    #     game_details_df = game_details_df[game_details_df['appid']==appid]
 
-        **Review Summary:**
-        {review_summary}
-        '''
+    #     # getting game name
+    #     name = game_details_df['name'].values[0]
 
-        return final_message
+    #     # getting game description
+    #     about_the_game = game_details_df['about_the_game'].values[0]
+
+    #     def remove_html_tags(text):
+    #         clean_text = re.sub(r'<.*?>', '', text).strip()
+    #         return clean_text
+        
+    #     about_the_game = remove_html_tags(about_the_game)
+
+    #     # using LLM to summarize reviews
+    #     review_summary = self.summarize_reviews(appid)
+
+    #     # wrapping description
+    #     about_the_game = "\n\t\t".join(textwrap.wrap("\t"+about_the_game, width=100))
+
+    #     final_message = f'''
+    #     **Game:** {name}
+        
+    #     **Description:**
+    #     {about_the_game}
+
+    #     **Review Summary:**
+    #     {review_summary}
+    #     '''
+
+    #     return final_message
 
 class ReviewSummary(BaseModel):
     """
@@ -205,6 +351,46 @@ class ReviewSummary(BaseModel):
     bugs: Annotated[str, "A short summary of the sentiment of the bugginess of the game"]
     other: Annotated[str, "A short summary of any other important important information offered by the reviews"]
     overall_sentiment: Annotated[str, "A short summary of the overall sentiment of the game"]
+
+def get_game_id_retriever(skip_populating=False):
+    print("Grabbing Game ID Retriever")
+
+    embeddings = HuggingFaceEmbeddings()
+
+    # defining vector store
+    vector_store = Chroma(
+        collection_name="game_appid",
+        embedding_function=embeddings,
+        persist_directory=f"./chroma_langchain_db/game_appid/",
+    )
+
+    if not skip_populating:
+        documents = []
+        df = pd.read_csv("../data/top_100_games.csv")[['appid', 'name']]
+
+        # Create documents from game_data_list
+        for idx in range(df.shape[0]):
+            row = df.loc[idx]
+            content = f"appid: {row['appid']}\nname: '{row['name']}'"
+            meta_data = {'source': '../data/top_100_games.csv', 'row': idx}
+
+            documents.append(
+                Document(
+                    page_content=content,
+                    id=idx,
+                    metadata=meta_data,
+                )
+            )
+        
+        # adding documents to vector store
+        uuids = [str(uuid.uuid4()) for _ in range(len(documents))]
+        vector_store.add_documents(documents=documents, ids=uuids)
+
+    retriever = vector_store.as_retriever()
+
+    print("Finished Grabbing Game ID Retriever")
+
+    return retriever
 
 def get_review_retriever(reviews, skip_populating=False, filter_app_id=None):
     print("Grabbing Review Retriever")

@@ -8,7 +8,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing import normalize
 
 
-def process_game_data(game_df, details_df, verbose=False, include_image_summary=False):
+def process_game_data(game_df, details_df, img_summary_df=None, verbose=False, include_image_summary=False):
     # Merge game data with details
     game_df = game_df[['appid']]
     game_df = game_df.merge(details_df, left_on='appid', right_on='appid', how='inner')
@@ -92,7 +92,6 @@ def process_game_data(game_df, details_df, verbose=False, include_image_summary=
 
     if include_image_summary:
         # grabbing df with header image summary
-        img_summary_df = pd.read_csv("../../data/top_100_game_image_summary.csv")
         def process_header_images(id):
             summary = img_summary_df[img_summary_df['appid']==id]['image_summary'].values[0]
             return summary

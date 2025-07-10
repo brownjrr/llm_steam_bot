@@ -47,3 +47,4 @@ sentence-transformers==4.1.0
 dash==2.14.2
 dash-bootstrap-components==2.0.3
 opencv-python==4.11.0.86
+langgraph==0.5.1
