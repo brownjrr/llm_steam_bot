@@ -93,7 +93,18 @@ def add_ai_response_loading(user_prompt):
 def populate_ai_response_bubble(_, message_ids, user_prompt):
     id = user_prompt['id']
 
-    response = llm.invoke(user_prompt['prompt'])
+    response = None
+    try:
+        response = llm.invoke(user_prompt['prompt'])
+    except Exception as e:
+        print(e)
+        
+        response = """
+## ⚠️ Error Encountered
+
+Something didn't go as expected.  
+Try another input
+"""
 
     # print(f"response:\n{response}")
 

@@ -184,7 +184,7 @@ def get_game_recommendation(appid: int):
     return recs_df
 
 # Pydantic
-desc_beginning = "A short description of what the reviews say about"
+desc_beginning = "A few unique sentences of what the reviews say about"
 
 class GameReviewSummary(BaseModel):
     """Game Review Summary to return to user"""
@@ -202,6 +202,49 @@ class GameReviewSummary(BaseModel):
 class SteamBotModel():
     def __init__(self, llm=None, reviews=None, populate_vector_stores=False):
         self.llm = llm
+    
+    def summarize_reviews(self, appid):
+        # Defining prompt template
+        template = """Use the following context from game reviews, answer the 
+        question (Respond in JSON with several different and unique thoughts about the `Target Audience`, `Graphics`, `Quality`,
+        `Requirements`, `Difficulty`, `Game Time/Length`, `Story`, `Bugs`, 
+        `Other Features`, `Sentiment` keys that each have something different and interesting to say):
+        {context}
+
+        Question: {question}
+        """
+
+        # Creating prompt
+        prompt = ChatPromptTemplate.from_template(template)
+        
+        def process_game_summary_review(game_summary_review) -> str:
+            ret_str = ""
+            emojis = ["🎯", "🎨", "✅", "💻", "🎮", "⏱️", "📚", "🐞", "💬"]
+            for index, key in enumerate(game_summary_review.__fields__.keys()):
+
+                content = textwrap.fill(getattr(game_summary_review, key), width=100)
+                ret_str += f"**{emojis[index]} {key.upper().replace('_', ' ')}**  \n* {content}\n\n"
+            
+            return ret_str
+        
+        retriever = get_review_retriever(get_reviews(), skip_populating=True, filter_app_id=str(appid))
+
+        chain = {"context": retriever, "question": RunnablePassthrough()} | prompt | self.llm.with_structured_output(GameReviewSummary) | RunnableLambda(process_game_summary_review)
+
+        print(f"Invoking to get game review summary (appid={appid})")
+
+        # Asking questions
+        # response = chain.invoke("Can you give a summary of the game reviews in paragraph form?", filter={"source": appid})
+        response = chain.invoke("Can you give a summary of the game reviews in paragraph form?")
+
+        return response
+
+    def verify(self, msg):
+        print(f"Verifying message {msg}")
+        if len(msg.tool_calls) <= 0:
+            print("No tools were used in the chain, raising Exception")
+            raise Exception("No tools were used in the chain")
+        return msg
 
     def invoke(self, user_prompt):
         """Finding name of game referenced by user"""
@@ -240,7 +283,25 @@ class SteamBotModel():
         # Asking questions
         response = (game_name_chain | appid_chain.map()).invoke(user_prompt)
         
-        print(f"response: {response}")
+# #         if sim_df['similarity_score'].values[0] > 0.7:
+# #             appid = sim_df['appid'].values[0]
+# #         else:
+# #             similar_game_list = ''.join(f'- **{game}**\n' for game in sim_df['name'].head(5).tolist())
+            
+# #             return f"""
+# # ## 🎮 Game Not Found  
+# # We couldn't find the game you were looking for based on your prompt.
+
+# # Here are 5 games we do have that may be similar to your prompt:
+
+# # ---
+
+# # {similar_game_list}
+# # """
+
+# #         print(f"App ID: {appid}")
+
+#         game_details_df = pd.read_csv(f"../data/top_100_game_details.csv")
         
         for game in response:
             agent = create_react_agent(self.llm, [get_game_info, get_game_recommendation])
@@ -310,6 +371,25 @@ class SteamBotModel():
 
     #     # getting game name
     #     name = game_details_df['name'].values[0]
+        # wrapping description
+#         about_the_game = textwrap.fill(about_the_game, width=100)
+
+#         # this must be indented all the way to the left or it will not render correctly
+#         final_message = f"""
+# ## 🎮 **Game**  
+# {str(name)}
+
+# ---
+
+# ## 📖 **Description**  
+# {about_the_game}
+
+# ---
+
+# ## 📝 **Review Summary**  
+
+# {review_summary}
+#         """
 
     #     # getting game description
     #     about_the_game = game_details_df['about_the_game'].values[0]
