@@ -6,6 +6,7 @@ import numpy as np
 import glob
 from multiprocessing import Pool
 import time
+import cv2
 
 
 def create_raw_apps_table(url):
@@ -225,11 +226,46 @@ def check_status_code_failures(app_detail_url):
 
     get_game_details(app_detail_url, df['appid'].tolist(), 101, verbose=False, save_status_codes=True)
 
+def get_image(df, appid, verbose=False):
+    df = df[df['appid']==appid]
+    img_url = df['header_image'].values[0]
+
+    # get image from url
+    response = requests.get(img_url)
+    img_arr = np.asarray(bytearray(response.content))
+
+    # decode image
+    image = cv2.imdecode(img_arr, cv2.IMREAD_COLOR)
+
+    # resize image
+    image = cv2.resize(image, (800, 600))
+
+    if verbose:
+        # Display the image (optional)
+        cv2.imshow("Image", image)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+    
+    return image
+    
+def get_game_header_images(df):
+    app_ids = list(df['appid'].unique())
+
+    for appid in app_ids:
+        img = get_image(df, appid, verbose=False)
+        
+        # Save the image to a new file
+        cv2.imwrite(f'../../data/header_images/{appid}.jpg', img)
 
 if __name__=="__main__":
     app_list_url = "https://api.steampowered.com/ISteamApps/GetAppList/v2/"
     app_detail_url = "http://store.steampowered.com/api/appdetails?appids="
     
+    """Processing image data"""
+    df = pd.read_csv("../../data/top_100_game_details.csv")
+
+    get_game_header_images(df)
+
     # """Step 1"""
     # # create_raw_apps_table(app_list_url)
     

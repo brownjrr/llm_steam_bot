@@ -8,7 +8,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing import normalize
 
 
-def process_game_data(game_df, details_df, verbose=False):
+def process_game_data(game_df, details_df, img_summary_df=None, verbose=False, include_image_summary=False):
     # Merge game data with details
     game_df = game_df[['appid']]
     game_df = game_df.merge(details_df, left_on='appid', right_on='appid', how='inner')
@@ -90,6 +90,14 @@ def process_game_data(game_df, details_df, verbose=False):
             return None
     game_df['publishers'] = game_df['publishers'].apply(process_publishers)
 
+    if include_image_summary:
+        # grabbing df with header image summary
+        def process_header_images(id):
+            summary = img_summary_df[img_summary_df['appid']==id]['image_summary'].values[0]
+            return summary
+        # processing header images
+        game_df['header_image_summary'] = game_df['appid'].apply(process_header_images)
+
     text_cols = [
         'name',
         'about_the_game',
@@ -98,6 +106,8 @@ def process_game_data(game_df, details_df, verbose=False):
         'genres',
         'publishers',
     ]
+
+    if include_image_summary: text_cols += ['header_image_summary']
 
     numeric_cols = [
         'is_free',
@@ -137,15 +147,16 @@ def process_game_data(game_df, details_df, verbose=False):
     text_vec_df = pd.DataFrame(vectorizer.fit_transform(game_df['text']).toarray())
 
     # create df from numeric cols
-    num_df = game_df[numeric_cols].fillna(0)
+    num_df = game_df[['appid']+numeric_cols].fillna(0).set_index("appid")
 
     num_df['is_free'] = num_df['is_free'].astype(int)
-    num_df = pd.DataFrame(normalize(num_df), columns=num_df.columns)
+    num_df = pd.DataFrame(normalize(num_df), columns=num_df.columns, index=num_df.index)
 
     # concatenate text_vec_df with numeric cols
     final_game_df = pd.DataFrame(
         data=np.hstack([num_df, text_vec_df]),
-        columns=numeric_cols+list(text_vec_df.columns)
+        columns=numeric_cols+list(text_vec_df.columns),
+        index=num_df.index
     )
     
     if verbose:
@@ -202,9 +213,9 @@ if __name__ == "__main__":
 
     # df.to_csv("../../data/top_100_game_details.csv", index=False)
 
-    # game_df = pd.read_csv("../../data/top_100_games.csv")
-    # game_details_df = pd.read_csv("../../data/top_100_game_details.csv")
-    # process_game_data(game_df, game_details_df)
+    game_df = pd.read_csv("../../data/top_100_games.csv")
+    game_details_df = pd.read_csv("../../data/top_100_game_details.csv")
+    process_game_data(game_df, game_details_df)
 
     """Processing Game Data"""
     # game_df = pd.read_csv("../../data/raw_game_data.csv")
