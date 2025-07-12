@@ -34,6 +34,9 @@ sys.path.append("../src/data_processing/")
 
 from games import process_game_data
 
+
+GAME_NOT_FOUND_STR = "<GAME_NOT_FOUND>"
+
 def content_based_recommendation(appid, X, similarity_method=None, top_n=10):
     if similarity_method is None or similarity_method not in ['cosine']:
         assert False, "This function is not capable of handling this similarity method"
@@ -89,9 +92,9 @@ def get_model():
 def summarize_reviews(appid, llm):
     # Defining prompt template
     template = """Use the following context from game reviews, answer the 
-    question (Respond in JSON with `Target Audience`, `Graphics`, `Quality`,
+    question (Respond in JSON with several different and unique thoughts about the `Target Audience`, `Graphics`, `Quality`,
     `Requirements`, `Difficulty`, `Game Time/Length`, `Story`, `Bugs`, 
-    `Other Features`, `Sentiment` keys):
+    `Other Features`, `Sentiment` keys that each have something different and interesting to say):
     {context}
 
     Question: {question}
@@ -102,10 +105,11 @@ def summarize_reviews(appid, llm):
     
     def process_game_summary_review(game_summary_review) -> str:
         ret_str = ""
-        
-        for i in game_summary_review.__fields__.keys():
-            content = '\n\t\t\t  '.join(textwrap.wrap(getattr(game_summary_review, i), width=100))
-            ret_str += f"\t{i.upper().replace('_', ' ')}:\n\t\t\t* {content}\n\t"
+        emojis = ["🎯", "🎨", "✅", "💻", "🎮", "⏱️", "📚", "🐞", "💬"]
+        for index, key in enumerate(game_summary_review.__fields__.keys()):
+
+            content = textwrap.fill(getattr(game_summary_review, key), width=100)
+            ret_str += f"**{emojis[index]} {key.upper().replace('_', ' ')}**  \n* {content}\n\n"
         
         return ret_str
     
@@ -116,7 +120,6 @@ def summarize_reviews(appid, llm):
     print(f"Invoking to get game review summary (appid={appid})")
 
     # Asking questions
-    # response = chain.invoke("Can you give a summary of the game reviews in paragraph form?", filter={"source": appid})
     response = chain.invoke("Can you give a summary of the game reviews in paragraph form?")
 
     return response
@@ -151,17 +154,11 @@ def get_game_info(appid: int):
     review_summary = summarize_reviews(appid, get_model())
 
     # wrapping description
-    about_the_game = "\n\t\t".join(textwrap.wrap("\t"+about_the_game, width=100))
+    about_the_game = "\n".join(textwrap.wrap(about_the_game, width=100))
 
-    final_message = f'''
-    **Game:** {name}
-    
-    **Description:**
-    {about_the_game}
-
-    **Review Summary:**
-    {review_summary}
-    '''
+    final_message = f"## 🎮 **Game**\n{str(name)}\n\n---\n\n" + \
+        f"## 📖 **Description**\n{about_the_game}\n\n---\n\n" + \
+        f"## 📝 **Review Summary**\n\n{review_summary}"
 
     return final_message
 
@@ -203,42 +200,6 @@ class SteamBotModel():
     def __init__(self, llm=None, reviews=None, populate_vector_stores=False):
         self.llm = llm
     
-    def summarize_reviews(self, appid):
-        # Defining prompt template
-        template = """Use the following context from game reviews, answer the 
-        question (Respond in JSON with several different and unique thoughts about the `Target Audience`, `Graphics`, `Quality`,
-        `Requirements`, `Difficulty`, `Game Time/Length`, `Story`, `Bugs`, 
-        `Other Features`, `Sentiment` keys that each have something different and interesting to say):
-        {context}
-
-        Question: {question}
-        """
-
-        # Creating prompt
-        prompt = ChatPromptTemplate.from_template(template)
-        
-        def process_game_summary_review(game_summary_review) -> str:
-            ret_str = ""
-            emojis = ["🎯", "🎨", "✅", "💻", "🎮", "⏱️", "📚", "🐞", "💬"]
-            for index, key in enumerate(game_summary_review.__fields__.keys()):
-
-                content = textwrap.fill(getattr(game_summary_review, key), width=100)
-                ret_str += f"**{emojis[index]} {key.upper().replace('_', ' ')}**  \n* {content}\n\n"
-            
-            return ret_str
-        
-        retriever = get_review_retriever(get_reviews(), skip_populating=True, filter_app_id=str(appid))
-
-        chain = {"context": retriever, "question": RunnablePassthrough()} | prompt | self.llm.with_structured_output(GameReviewSummary) | RunnableLambda(process_game_summary_review)
-
-        print(f"Invoking to get game review summary (appid={appid})")
-
-        # Asking questions
-        # response = chain.invoke("Can you give a summary of the game reviews in paragraph form?", filter={"source": appid})
-        response = chain.invoke("Can you give a summary of the game reviews in paragraph form?")
-
-        return response
-
     def verify(self, msg):
         print(f"Verifying message {msg}")
         if len(msg.tool_calls) <= 0:
@@ -257,52 +218,68 @@ class SteamBotModel():
             Return as List of Strings, with no other text
         """
 
-        def extract_names_str(ai_message):
+        def load_json_str(ai_message):
             return json.loads(ai_message.content)
         
-        # retriever = get_game_id_retriever(skip_populating=True)
         retriever = get_game_data_retriever(skip_populating=True)
 
         game_name_chain = (
             {"prompt": RunnablePassthrough()}
             | ChatPromptTemplate.from_template(template)
             | self.llm 
-            | RunnableLambda(extract_names_str)
+            | RunnableLambda(load_json_str)
         )
+
+        def load_app_json_str(ai_message):
+            if GAME_NOT_FOUND_STR in ai_message.content:
+                return GAME_NOT_FOUND_STR
+            
+            return json.loads(ai_message.content)
 
         appid_chain = (
             {"context": retriever, "game": RunnablePassthrough()}
             | ChatPromptTemplate.from_template(
                 "Return the `appid` of game '{game}' given the following context: {context}" \
-                "\n\nReturn answer as a JSON dictionary with keys `name` and `appid`"
+                "\n\nReturn answer as a JSON dictionary with keys `name` and `appid`." \
+                f"If you can't find the app_id of this game, return the following string: '{GAME_NOT_FOUND_STR}'"
             )
             | self.llm
-            | RunnableLambda(extract_names_str)
+            | RunnableLambda(load_app_json_str)
         )
 
         # Asking questions
         response = (game_name_chain | appid_chain.map()).invoke(user_prompt)
         
-# #         if sim_df['similarity_score'].values[0] > 0.7:
-# #             appid = sim_df['appid'].values[0]
-# #         else:
-# #             similar_game_list = ''.join(f'- **{game}**\n' for game in sim_df['name'].head(5).tolist())
+        if isinstance(response, list) and all([i == GAME_NOT_FOUND_STR for i in response]):
+            similar_game_chain = (
+                {"context": retriever, "game": RunnablePassthrough()}
+                | ChatPromptTemplate.from_template(
+                    "Return answer as a comma-separated list (0-5 items)--no other text--of the most similar games " \
+                    "(by name) to the following game, given the following context:\n\n" \
+                    "Game Name: {game}\n\nContext: {context}"
+                )
+                | self.llm
+            )
+
+            response = (game_name_chain | similar_game_chain.map()).invoke(user_prompt)
+
+            similar_game_list = []
+            for item in response:
+                similar_game_list += [i.strip() for i in item.content.strip().split(",")]
+
+            similar_game_list = ''.join(f'- **{game}**\n' for game in similar_game_list)
             
-# #             return f"""
-# # ## 🎮 Game Not Found  
-# # We couldn't find the game you were looking for based on your prompt.
+            return f"""
+## 🎮 Game Not Found  
+We couldn't find the game you were looking for based on your prompt.
 
-# # Here are 5 games we do have that may be similar to your prompt:
+Here are some games we do have that may be similar to your prompt:
 
-# # ---
+---
 
-# # {similar_game_list}
-# # """
+{similar_game_list}
+"""
 
-# #         print(f"App ID: {appid}")
-
-#         game_details_df = pd.read_csv(f"../data/top_100_game_details.csv")
-        
         for game in response:
             agent = create_react_agent(self.llm, [get_game_info, get_game_recommendation])
 
@@ -312,111 +289,18 @@ class SteamBotModel():
                 "messages": [system_message, input_message],
             })
 
+            tool_called = ""
             for message in agent_response['messages']:
                 if isinstance(message, ToolMessage):
-                    if message.name in ["get_game_info"]:
+                    if message.name == "get_game_info":
+                        tool_called = "get_game_info"
                         response = message.content
                         break
-            response = agent_response['messages'][-1].content
+            
+            if tool_called != "get_game_info":
+                response = agent_response['messages'][-1].content
 
         return response
-    
-    # def invoke(self, user_prompt):
-    #     """Finding name of game referenced by user"""
-    #     template = """
-    #         Get the name of the game mentioned in the following prompt:
-
-    #         Prompt: {prompt}
-
-    #         Return the results as a single Python string, with no other text
-    #     """
-
-    #     # Creating prompt
-    #     prompt = ChatPromptTemplate.from_template(template)
-
-    #     def extract_name_str(ai_message):
-    #         return re.sub(r'[^\w\s]', '', ai_message.content.strip().lower())
-
-    #     # defining chain
-    #     game_name_chain = {"prompt": RunnablePassthrough()} | prompt | self.llm | RunnableLambda(extract_name_str)
-
-    #     # Asking questions
-    #     game_name = game_name_chain.invoke(user_prompt)
-
-    #     # find the most similar game in our dataset
-    #     games_df = pd.read_csv(f"../data/top_100_games.csv")
-
-    #     print(games_df)
-
-    #     games_df['similarity_score'] = games_df['name'].apply(lambda x: Levenshtein.ratio(game_name, re.sub(r'[^\w\s]', '', x.lower())))
-
-    #     sim_df = games_df[['appid', 'name', 'similarity_score']].sort_values(
-    #         by=['similarity_score'], 
-    #         ascending=False
-    #     )
-
-    #     print(sim_df)
-        
-    #     if sim_df['similarity_score'].values[0] > 0.7:
-    #         appid = sim_df['appid'].values[0]
-    #     else:
-    #         appid = None
-
-    #     print(f"App ID: {appid}")
-
-    #     game_details_df = pd.read_csv(f"../data/top_100_game_details.csv")
-        
-    #     # filter by appid
-    #     game_details_df = game_details_df[game_details_df['appid']==appid]
-
-    #     # getting game name
-    #     name = game_details_df['name'].values[0]
-        # wrapping description
-#         about_the_game = textwrap.fill(about_the_game, width=100)
-
-#         # this must be indented all the way to the left or it will not render correctly
-#         final_message = f"""
-# ## 🎮 **Game**  
-# {str(name)}
-
-# ---
-
-# ## 📖 **Description**  
-# {about_the_game}
-
-# ---
-
-# ## 📝 **Review Summary**  
-
-# {review_summary}
-#         """
-
-    #     # getting game description
-    #     about_the_game = game_details_df['about_the_game'].values[0]
-
-    #     def remove_html_tags(text):
-    #         clean_text = re.sub(r'<.*?>', '', text).strip()
-    #         return clean_text
-        
-    #     about_the_game = remove_html_tags(about_the_game)
-
-    #     # using LLM to summarize reviews
-    #     review_summary = self.summarize_reviews(appid)
-
-    #     # wrapping description
-    #     about_the_game = "\n\t\t".join(textwrap.wrap("\t"+about_the_game, width=100))
-
-    #     final_message = f'''
-    #     **Game:** {name}
-        
-    #     **Description:**
-    #     {about_the_game}
-
-    #     **Review Summary:**
-    #     {review_summary}
-    #     '''
-
-    #     return final_message
 
 class ReviewSummary(BaseModel):
     """
@@ -514,10 +398,7 @@ def get_review_retriever(reviews, skip_populating=False, filter_app_id=None):
             vector_store.add_documents(documents=documents, ids=uuids)
 
     # transforming chroma vectorsotre into a retriever
-    if filter_app_id:
-        retriever = vector_store.as_retriever()
-    else:
-        retriever = vector_store.as_retriever()
+    retriever = vector_store.as_retriever()
 
     print("Finished Grabbing Review Retriever")
 
