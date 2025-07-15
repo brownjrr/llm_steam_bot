@@ -49,15 +49,17 @@ pip install the reqiured packages by running this in the project directory:
 ```bash
 pip install -r requirements.txt
 ```
+This may take a while if you do not already have these packages cached
 
 ---
 
 ## 4. Run the Dash Application
 
-Navigate to the app folder by running cd app
-Then you can run the application by running app.py
-
-You can do this by simply running
+Navigate to the app folder by running
+```bash
+cd app
+```
+Then you can run the application by running app.py with this command
 ```bash
 python app.py
 ```
