@@ -57,7 +57,10 @@ pip install -r requirements.txt
 Navigate to the app folder by running cd app
 Then you can run the application by running app.py
 
-You can do this by simply running python app.py
+You can do this by simply running
+```bash
+python app.py
+```
 
 This will start the Dash application on localhost port 8050
 You can navigate to that in any browser by typing localhost:8050 or 127.0.0.1:8050
