@@ -1,9 +1,6 @@
 import dash
 import dash_bootstrap_components as dbc
-import time
-import sys
-import os
-from llm import SteamBotModel, get_reviews, get_model
+from llm import SteamBotModel, get_model
 from dash import Input, Output, State, callback, html, dcc, Patch, ALL, ctx
 from dash.exceptions import PreventUpdate
 

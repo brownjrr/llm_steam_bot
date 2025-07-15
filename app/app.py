@@ -1,5 +1,5 @@
 import dash_bootstrap_components as dbc
-from dash import Dash, html
+from dash import Dash
 from layouts import layout
 from callbacks import *
 
