@@ -33,7 +33,7 @@ from games import process_game_data
 
 GAME_NOT_FOUND_STR = "<GAME_NOT_FOUND>"
 
-def content_based_recommendation(appid, X, similarity_method=None, top_n=10):
+def content_based_recommendation(appid, X, similarity_method=None, top_n=5):
     if similarity_method is None or similarity_method not in ['cosine']:
         assert False, "This function is not capable of handling this similarity method"
 
@@ -172,9 +172,23 @@ def get_game_recommendation(appid: int):
     img_summary_df = pd.read_csv("../data/top_100_game_image_summary.csv")
     
     df = process_game_data(game_df, game_details_df, img_summary_df=img_summary_df, verbose=False, include_image_summary=True)
-    recs_df = content_based_recommendation(appid, df, similarity_method='cosine')
+    num_games = 5
+    recs_df = content_based_recommendation(appid, df, similarity_method='cosine', top_n=num_games)
 
-    return recs_df
+    game_str = str(game_details_df[game_details_df['appid'] == appid]['name'].values[0])
+
+    final_message = f"""## 🎮 Similar Games to {game_str}
+
+Based on our analysis, here are {num_games} games that are most similar to {game_str}. These recommendations are ranked by similarity score.
+
+| Game Title | Similarity Score |
+|------------|------------------|
+"""
+
+    for _, row in recs_df.iterrows():
+        final_message += f"| {row['name']} | {row['score']:.3f} |\n"
+
+    return final_message
 
 # Pydantic
 desc_beginning = "A few unique sentences of what the reviews say about"
@@ -285,18 +299,10 @@ Here are some games we do have that may be similar to your prompt:
                 "messages": [system_message, input_message],
             })
 
-            tool_called = ""
-            for message in agent_response['messages']:
-                if isinstance(message, ToolMessage):
-                    if message.name == "get_game_info":
-                        tool_called = "get_game_info"
-                        response = message.content
-                        break
-            
-            if tool_called != "get_game_info":
-                response = agent_response['messages'][-1].content
-
-        return response
+        return next(
+                    (msg.content for msg in agent_response['messages'] if isinstance(msg, ToolMessage)),
+                    "Please ask about either a game summary or for recommendations similar to a game"
+                )
 
 class ReviewSummary(BaseModel):
     """
