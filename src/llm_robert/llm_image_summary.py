@@ -26,7 +26,6 @@ def get_model():
 
     # creating model
     llm = ChatBedrockConverse(
-        # model="us.meta.llama3-1-70b-instruct-v1:0", 
         model="us.meta.llama4-maverick-17b-instruct-v1:0",
         region_name="us-east-1"
     )
@@ -52,7 +51,10 @@ if __name__ == "__main__":
         # Create a message with the image
         message = HumanMessage(
             content=[
-                {"type": "text", "text": "Describe the tone of this image. Do not mention the game's name."},
+                {
+                    "type": "text", 
+                    "text": "Describe the tone of this image. Be concise. Do not mention the game's name."
+                },
                 {
                     "type": "image_url",
                     "image_url": {"url": f"data:image/jpeg;base64,{image_data}"},
@@ -67,4 +69,4 @@ if __name__ == "__main__":
 
     df = pd.DataFrame(data, columns=['appid', 'image_summary'])
 
-    df.to_csv("../../data/top_100_game_image_summary.csv")
+    df.to_csv("../../data/top_1000_game_image_summary.csv")
