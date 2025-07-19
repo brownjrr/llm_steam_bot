@@ -126,12 +126,13 @@ def get_game_details_v2(url, app_id_list, chunk_num=None, verbose=False, save_st
     # check for no data requests
     no_data_requests = [int(i.split('\\')[-1].replace(".json", "")) for i in glob.glob("../../data/no_data_requests/*")]
 
-    print(f"successful_requests: {successful_requests}")
-    print(f"failed_requests: {failed_requests}")
-    print(f"no_data_requests: {no_data_requests}")
+    # print(f"successful_requests: {successful_requests}")
+    # print(f"failed_requests: {failed_requests}")
+    # print(f"no_data_requests: {no_data_requests}")
 
     # filter app_id_list
-    df = df[(df['appid'].isin(app_id_list)) & (~df['appid'].isin(successful_requests+failed_requests+no_data_requests))]
+    # df = df[(df['appid'].isin(app_id_list)) & (~df['appid'].isin(successful_requests+failed_requests+no_data_requests))]
+    df = df[(df['appid'].isin(app_id_list)) & (~df['appid'].isin(successful_requests+no_data_requests))]
 
     print(f'total rows: {df.shape[0]}')
 
@@ -262,12 +263,13 @@ if __name__=="__main__":
     app_detail_url = "http://store.steampowered.com/api/appdetails?appids="
     
     """Processing image data"""
-    df = pd.read_csv("../../data/top_100_game_details.csv")
+    df = pd.read_csv("../../data/top_1000_game_details.csv")
 
     get_game_header_images(df)
+    ################################################
 
     # """Step 1"""
-    # # create_raw_apps_table(app_list_url)
+    # create_raw_apps_table(app_list_url)
     
     # """Step 2"""
     # app_list = get_appid_list()
@@ -293,6 +295,12 @@ if __name__=="__main__":
     """Top 100 Games Data"""
     # get app ids
     # df = pd.read_csv("../../data/top_100_games.csv")
+    # app_list = df['appid'].tolist()
+    # get_game_details_v2(app_detail_url, app_list)
+
+    """Top 1000 Games Data"""
+    # # get app ids
+    # df = pd.read_csv("../../data/game_player_cnt_ranked_top_1k.csv")
     # app_list = df['appid'].tolist()
     # get_game_details_v2(app_detail_url, app_list)
 

@@ -205,6 +205,14 @@ def json_to_df(app_list=None):
     return df    
 
 if __name__ == "__main__":
+    """Processing Top 1000 Games Data"""
+    # # get app ids
+    # df = pd.read_csv("../../data/game_player_cnt_ranked_top_1k.csv")
+    # app_list = df['appid'].tolist()
+    # df = json_to_df(app_list)
+
+    # df.to_csv("../../data/top_1000_game_details.csv", index=False)
+
     """Processing Top 100 Games Data"""
     # # get app ids
     # df = pd.read_csv("../../data/top_100_games.csv")
@@ -213,9 +221,9 @@ if __name__ == "__main__":
 
     # df.to_csv("../../data/top_100_game_details.csv", index=False)
 
-    game_df = pd.read_csv("../../data/top_100_games.csv")
-    game_details_df = pd.read_csv("../../data/top_100_game_details.csv")
-    process_game_data(game_df, game_details_df)
+    # game_df = pd.read_csv("../../data/top_100_games.csv")
+    # game_details_df = pd.read_csv("../../data/top_100_game_details.csv")
+    # process_game_data(game_df, game_details_df)
 
     """Processing Game Data"""
     # game_df = pd.read_csv("../../data/raw_game_data.csv")
