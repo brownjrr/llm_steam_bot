@@ -59,6 +59,10 @@ Navigate to the app folder by running
 ```bash
 cd app
 ```
+If this is the first time you are running the applicaiton, you will need to create the .csv files from their compressed .gz form by running
+```bash
+python ../src/data_processing/create_csv_from_gz.py
+```
 Then you can run the application by running app.py with this command
 ```bash
 python app.py
