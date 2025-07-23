@@ -1,10 +1,8 @@
 import requests
-import os
 import json
 import pandas as pd
 import numpy as np
 import glob
-from multiprocessing import Pool
 import time
 import cv2
 
