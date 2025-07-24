@@ -5,6 +5,8 @@ import numpy as np
 import glob
 import time
 import cv2
+import re
+import ast
 
 
 def create_raw_apps_table(url):
@@ -124,12 +126,13 @@ def get_game_details_v2(url, app_id_list, chunk_num=None, verbose=False, save_st
     # check for no data requests
     no_data_requests = [int(i.split('\\')[-1].replace(".json", "")) for i in glob.glob("../../data/no_data_requests/*")]
 
-    print(f"successful_requests: {successful_requests}")
-    print(f"failed_requests: {failed_requests}")
-    print(f"no_data_requests: {no_data_requests}")
+    # print(f"successful_requests: {successful_requests}")
+    # print(f"failed_requests: {failed_requests}")
+    # print(f"no_data_requests: {no_data_requests}")
 
     # filter app_id_list
-    df = df[(df['appid'].isin(app_id_list)) & (~df['appid'].isin(successful_requests+failed_requests+no_data_requests))]
+    # df = df[(df['appid'].isin(app_id_list)) & (~df['appid'].isin(successful_requests+failed_requests+no_data_requests))]
+    df = df[(df['appid'].isin(app_id_list)) & (~df['appid'].isin(successful_requests+no_data_requests))]
 
     print(f'total rows: {df.shape[0]}')
 
@@ -245,6 +248,36 @@ def get_image(df, appid, verbose=False):
         cv2.destroyAllWindows()
     
     return image
+
+def get_screenshots(df, appid, verbose=False):
+    df = df[df['appid']==appid]
+    img_urls = ast.literal_eval(df['screenshots'].tolist()[0])
+    images = []
+
+    for i in img_urls:
+        url_path_key = "path_full" if "path_full" in i else "path_thumbnail"
+        url = i[url_path_key]
+        id = i['id']
+
+        # get image from url
+        response = requests.get(url)
+        img_arr = np.asarray(bytearray(response.content))
+
+        # decode image
+        image = cv2.imdecode(img_arr, cv2.IMREAD_COLOR)
+
+        # resize image
+        image = cv2.resize(image, (800, 600))
+
+        if verbose:
+            # Display the image (optional)
+            cv2.imshow("Image", image)
+            cv2.waitKey(0)
+            cv2.destroyAllWindows()
+        
+        images.append((id, image))
+    
+    return images
     
 def get_game_header_images(df):
     app_ids = list(df['appid'].unique())
@@ -255,17 +288,39 @@ def get_game_header_images(df):
         # Save the image to a new file
         cv2.imwrite(f'../../data/header_images/{appid}.jpg', img)
 
+def get_screenshot_images(df):
+    app_ids = list(df['appid'].unique())
+
+    for appid in app_ids:
+        try:
+            images = get_screenshots(df, appid)
+        except:
+            print(f"Failed to get screenshots for {appid}")
+            continue
+
+        screenshot_dir = f'../../data/screenshots/{appid}'
+        os.makedirs(screenshot_dir, exist_ok=True)
+        
+        for id, img in images:
+            # Save the image to a new file
+            cv2.imwrite(f'../../data/screenshots/{appid}/{id}.jpg', img)
+    
 if __name__=="__main__":
     app_list_url = "https://api.steampowered.com/ISteamApps/GetAppList/v2/"
     app_detail_url = "http://store.steampowered.com/api/appdetails?appids="
     
     """Processing image data"""
-    df = pd.read_csv("../../data/top_100_game_details.csv")
+    # df = pd.read_csv("../../data/top_1000_game_details.csv")
 
-    get_game_header_images(df)
+    # get_game_header_images(df)
+
+    """Processing all image data"""
+    df = pd.read_csv("../../data/top_1000_game_details.csv")
+    get_screenshot_images(df)
+    ################################################
 
     # """Step 1"""
-    # # create_raw_apps_table(app_list_url)
+    # create_raw_apps_table(app_list_url)
     
     # """Step 2"""
     # app_list = get_appid_list()
@@ -291,6 +346,12 @@ if __name__=="__main__":
     """Top 100 Games Data"""
     # get app ids
     # df = pd.read_csv("../../data/top_100_games.csv")
+    # app_list = df['appid'].tolist()
+    # get_game_details_v2(app_detail_url, app_list)
+
+    """Top 1000 Games Data"""
+    # # get app ids
+    # df = pd.read_csv("../../data/game_player_cnt_ranked_top_1k.csv")
     # app_list = df['appid'].tolist()
     # get_game_details_v2(app_detail_url, app_list)
 
