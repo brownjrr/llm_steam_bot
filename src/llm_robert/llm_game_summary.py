@@ -1,19 +1,14 @@
 import gzip
 import pandas as pd
-import chromadb
 from io import BytesIO
 from uuid import uuid4
 from langchain_aws.chat_models import ChatBedrockConverse
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.prompts.chat import SystemMessagePromptTemplate, HumanMessagePromptTemplate
 from langchain_core.documents import Document
 from langchain_chroma import Chroma
-from langchain_aws import BedrockEmbeddings
 from langchain_aws.chat_models import ChatBedrockConverse
 from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 from langchain_huggingface.embeddings import HuggingFaceEmbeddings
-from langchain.agents.agent_types import AgentType
-from langchain_experimental.agents import create_pandas_dataframe_agent
 from langchain.document_loaders import CSVLoader
 
 def get_reviews(app_id, relative_path_to_base="../../"):
