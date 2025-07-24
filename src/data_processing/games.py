@@ -8,7 +8,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing import normalize
 
 
-def process_game_data(game_df, details_df, img_summary_df=None, verbose=False, include_image_summary=False):
+def process_game_data(game_df, details_df, img_summary_df=None, screenshot_summary_df=None, img_summary_df_v2=None, verbose=False, include_image_summary=False):
     # Merge game data with details
     game_df = game_df[['appid']]
     game_df = game_df.merge(details_df, left_on='appid', right_on='appid', how='inner')
@@ -98,6 +98,24 @@ def process_game_data(game_df, details_df, img_summary_df=None, verbose=False, i
         # processing header images
         game_df['header_image_summary'] = game_df['appid'].apply(process_header_images)
 
+    if img_summary_df_v2 is not None:
+        # grabbing df with header image summary
+        def process_header_images_v2(id):
+            summary = img_summary_df_v2[img_summary_df_v2['appid']==id]['image_keywords'].values[0]
+            return summary
+        # processing header images
+        game_df['header_image_summary'] = game_df['appid'].apply(process_header_images_v2)
+
+    if screenshot_summary_df is not None:
+        # grabbing df with header image summary
+        def process_screenshots(id):
+            summary = screenshot_summary_df[screenshot_summary_df['appid']==id]['screenshot_summary'].values[0]
+            if summary is not None:
+                summary = " ".join(ast.literal_eval(summary))
+            return summary
+        # processing screenshots
+        game_df['screenshot_summary'] = game_df['appid'].apply(process_screenshots)
+
     text_cols = [
         'name',
         'about_the_game',
@@ -107,7 +125,8 @@ def process_game_data(game_df, details_df, img_summary_df=None, verbose=False, i
         'publishers',
     ]
 
-    if include_image_summary: text_cols += ['header_image_summary']
+    if include_image_summary or img_summary_df_v2 is not None: text_cols += ['header_image_summary']
+    if screenshot_summary_df is not None: text_cols += ['screenshot_summary']
 
     numeric_cols = [
         'is_free',
@@ -206,12 +225,28 @@ def json_to_df(app_list=None):
 
 if __name__ == "__main__":
     """Processing Top 1000 Games Data"""
-    # # get app ids
+    # get app ids
     # df = pd.read_csv("../../data/game_player_cnt_ranked_top_1k.csv")
     # app_list = df['appid'].tolist()
     # df = json_to_df(app_list)
 
     # df.to_csv("../../data/top_1000_game_details.csv", index=False)
+
+    game_df = pd.read_csv("../../data/game_player_cnt_ranked_top_1k.csv")
+    game_details_df = pd.read_csv("../../data/top_1000_game_details.csv")
+    img_summary_df = pd.read_csv("../../data/top_1000_game_image_summary.csv")
+    img_summary_df_v2 = pd.read_csv("../../data/top_1000_game_image_keywords.csv")
+    screenshot_summary_df = pd.read_csv("../../data/top_1000_game_screenshot_summary.csv")
+    
+    process_game_data(
+        game_df, 
+        game_details_df,
+        img_summary_df=None,
+        img_summary_df_v2=img_summary_df_v2, 
+        screenshot_summary_df=screenshot_summary_df, 
+        include_image_summary=False,
+        verbose=True, 
+    )
 
     """Processing Top 100 Games Data"""
     # # get app ids
