@@ -13,7 +13,7 @@ from langchain.document_loaders import CSVLoader
 
 def get_reviews(app_id, relative_path_to_base="../../"):
     # Open and read a .gz file
-    with gzip.open(f'{relative_path_to_base}data/top_100_game_reviews.gz', 'rb') as file:
+    with gzip.open(f'{relative_path_to_base}data/top_1000_game_reviews.gz', 'rb') as file:
         bytes = file.read()
         byte_stream = BytesIO(bytes)
         df = pd.read_csv(byte_stream)
@@ -73,7 +73,7 @@ def get_game_data_retriever(populate_vector_store=False, relative_path_llm_dir="
     if populate_vector_store:
         # Create documents from df records
         loader = CSVLoader(
-            file_path="../../data/top_100_game_details.csv", 
+            file_path="../../data/top_1000_game_details.csv",
             encoding='utf-8',
             csv_args={
                 'delimiter': ',',
@@ -147,12 +147,12 @@ def summarize_reviews(reviews, llm=None, populate_vector_store=False, relative_p
 """Combining reviews for each game into a single document"""
 def combine_reviews():
     # Open and read a .gz file
-    with gzip.open('../../data/top_100_game_reviews.gz', 'rb') as file:
+    with gzip.open('../../data/top_1000_game_reviews.gz', 'rb') as file:
         bytes = file.read()
         byte_stream = BytesIO(bytes)
         df = pd.read_csv(byte_stream)
     
-    game_df = pd.read_csv("../../data/top_100_game_details.csv")
+    game_df = pd.read_csv("../../data/top_1000_game_details.csv")
     
     print(game_df)
     print(game_df.columns)
@@ -189,7 +189,7 @@ def invoke_llm(model, prompt_str, populate_vector_store=False, relative_path_llm
     # print(f"App ID: {appid}")
 
     # get description
-    game_details_df = pd.read_csv(f"{relative_path_to_base}data/top_100_game_details.csv")
+    game_details_df = pd.read_csv(f"{relative_path_to_base}data/top_1000_game_details.csv")
     
     # filter by appid
     game_details_df = game_details_df[game_details_df['appid']==appid]
@@ -260,5 +260,5 @@ if __name__ == "__main__":
 
     invoke_llm(llm, prompt, populate_vector_store=False)
 
-    # df= pd.read_csv("../../data/top_100_games.csv")
+    # df= pd.read_csv("../../data/game_player_cnt_ranked_top_1k.csv")
     # print(df.drop_duplicates(subset=['name']))

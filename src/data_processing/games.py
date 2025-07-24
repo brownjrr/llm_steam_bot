@@ -248,16 +248,16 @@ if __name__ == "__main__":
         verbose=True, 
     )
 
-    """Processing Top 100 Games Data"""
+    """Processing Top 1000 Games Data"""
     # # get app ids
-    # df = pd.read_csv("../../data/top_100_games.csv")
+    # df = pd.read_csv("../../data/game_player_cnt_ranked_top_1k.csv")
     # app_list = df['appid'].tolist()
     # df = json_to_df(app_list)
 
-    # df.to_csv("../../data/top_100_game_details.csv", index=False)
+    # df.to_csv("../../data/top_1000_game_details.csv", index=False)
 
-    # game_df = pd.read_csv("../../data/top_100_games.csv")
-    # game_details_df = pd.read_csv("../../data/top_100_game_details.csv")
+    # game_df = pd.read_csv("../../data/top_1000_games.csv")
+    # game_details_df = pd.read_csv("../../data/top_1000_game_details.csv")
     # process_game_data(game_df, game_details_df)
 
     """Processing Game Data"""
