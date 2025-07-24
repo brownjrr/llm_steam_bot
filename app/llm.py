@@ -359,7 +359,7 @@ def get_game_id_retriever(skip_populating=False):
     return retriever
 
 def get_review_retriever(reviews, skip_populating=False, filter_app_id=None):
-    print("Grabbing Review Retriever")
+    print(f"Grabbing Review Retriever for App ID: {filter_app_id}")
 
     embeddings = HuggingFaceEmbeddings()
 
@@ -381,6 +381,10 @@ def get_review_retriever(reviews, skip_populating=False, filter_app_id=None):
             )
 
             recursive_splits = recursive_splitter.split_text(content)
+
+            # an empty review is causing documents to be empty which throws an error
+            if not recursive_splits:
+                continue
 
             documents = []
 
