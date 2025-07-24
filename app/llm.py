@@ -56,7 +56,7 @@ def content_based_recommendation(appid, X, similarity_method=None, top_n=10):
     app_similarities = app_similarities.reset_index()
 
     # get app names
-    game_df = pd.read_csv("../data/top_100_games.csv")[['appid', 'name']]
+    game_df = pd.read_csv("../data/game_player_cnt_ranked_top_1k.csv")[['appid', 'name']]
     app_similarities = app_similarities.merge(game_df, on=['appid'], how='inner')
 
     # separate app row from suggestion rows
@@ -67,7 +67,7 @@ def content_based_recommendation(appid, X, similarity_method=None, top_n=10):
 
 def get_reviews(app_id=None):
     # Open and read a .gz file
-    with gzip.open(f'../data/top_100_game_reviews.gz', 'rb') as file:
+    with gzip.open(f'../data/top_1000_game_reviews.gz', 'rb') as file:
         bytes = file.read()
         byte_stream = BytesIO(bytes)
         df = pd.read_csv(byte_stream)
@@ -171,7 +171,7 @@ def get_game_recommendation(appid: int):
     1. If the user asks for recommendations based on the game "Left 4 Dead 2" 
     and you find this game's appid to be 550, you would specify the appid as 550
     """
-    game_df = pd.read_csv("../data/top_100_games.csv")
+    game_df = pd.read_csv("../data/game_player_cnt_ranked_top_1k.csv")
     game_details_df = pd.read_csv("../data/top_100_game_details.csv")
     img_summary_df = pd.read_csv("../data/top_100_game_image_summary.csv")
     
@@ -330,13 +330,13 @@ def get_game_id_retriever(skip_populating=False):
 
     if not skip_populating:
         documents = []
-        df = pd.read_csv("../data/top_100_games.csv")[['appid', 'name']]
+        df = pd.read_csv("../data/game_player_cnt_ranked_top_1k.csv")[['appid', 'name']]
 
         # Create documents from game_data_list
         for idx in range(df.shape[0]):
             row = df.loc[idx]
             content = f"appid: {row['appid']}\nname: '{row['name']}'"
-            meta_data = {'source': '../data/top_100_games.csv', 'row': idx}
+            meta_data = {'source': '../data/game_player_cnt_ranked_top_1k.csv', 'row': idx}
 
             documents.append(
                 Document(
