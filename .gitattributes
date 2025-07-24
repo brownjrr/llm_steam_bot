@@ -1,2 +1,4 @@
 game_details_sample.csv filter=lfs diff=lfs merge=lfs -text
-*.csv filter=lfs diff=lfs merge=lfs -text
+users_friendlist.csv filter=lfs diff=lfs merge=lfs -text
+users_owned_games.csv filter=lfs diff=lfs merge=lfs -text
+raw_game_data.csv filter=lfs diff=lfs merge=lfs -text
