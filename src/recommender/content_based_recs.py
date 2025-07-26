@@ -53,7 +53,7 @@ def content_based_recommendation(appids, X, sim_df=None, similarity_method=None,
     return app_similarities
 
 if __name__ == "__main__":
-    game_df = pd.read_csv("../../data/top_100_games.csv")
+    game_df = pd.read_csv("../../data/game_player_cnt_ranked_top_1k.csv")
     game_details_df = pd.read_csv("../../data/top_1000_game_details.csv")
     img_summary_df = pd.read_csv("../../data/top_1000_game_image_summary.csv")
 

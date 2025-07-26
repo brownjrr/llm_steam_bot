@@ -343,9 +343,9 @@ if __name__=="__main__":
     # """Step 3"""
     # # combine_game_details()
 
-    """Top 100 Games Data"""
+    """Top 1000 Games Data"""
     # get app ids
-    # df = pd.read_csv("../../data/top_100_games.csv")
+    # df = pd.read_csv("../../data/game_player_cnt_ranked_top_1k.csv")
     # app_list = df['appid'].tolist()
     # get_game_details_v2(app_detail_url, app_list)
 

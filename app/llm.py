@@ -129,7 +129,7 @@ def get_game_info(appid: int):
     1. If the user asks about the game "Left 4 Dead 2" and you find this game's 
     appid to be 550, you would specify the appid as 550
     """
-    game_details_df = pd.read_csv(f"../data/top_100_game_details.csv")
+    game_details_df = pd.read_csv(f"../data/top_1000_game_details.csv")
     
     # filter by appid
     game_details_df = game_details_df[game_details_df['appid']==appid]
@@ -168,8 +168,8 @@ def get_game_recommendation(appid: int):
     and you find this game's appid to be 550, you would specify the appid as 550
     """
     game_df = pd.read_csv("../data/game_player_cnt_ranked_top_1k.csv")
-    game_details_df = pd.read_csv("../data/top_100_game_details.csv")
-    img_summary_df = pd.read_csv("../data/top_100_game_image_summary.csv")
+    game_details_df = pd.read_csv("../data/top_1000_game_details.csv")
+    img_summary_df = pd.read_csv("../data/top_1000_game_image_summary.csv")
     
     df = process_game_data(game_df, game_details_df, img_summary_df=img_summary_df, verbose=False, include_image_summary=True)
     num_games = 5
@@ -359,7 +359,7 @@ def get_game_id_retriever(skip_populating=False):
     return retriever
 
 def get_review_retriever(reviews, skip_populating=False, filter_app_id=None):
-    print("Grabbing Review Retriever")
+    print(f"Grabbing Review Retriever for App ID: {filter_app_id}")
 
     embeddings = HuggingFaceEmbeddings()
 
@@ -381,6 +381,10 @@ def get_review_retriever(reviews, skip_populating=False, filter_app_id=None):
             )
 
             recursive_splits = recursive_splitter.split_text(content)
+
+            # an empty review is causing documents to be empty which throws an error
+            if not recursive_splits:
+                continue
 
             documents = []
 
@@ -421,7 +425,7 @@ def get_game_data_retriever(skip_populating=False):
     if not skip_populating:
         # Create documents from df records
         loader = CSVLoader(
-            file_path="../data/top_100_game_details.csv", 
+            file_path="../data/top_1000_game_details.csv", 
             encoding='utf-8',
             csv_args={
                 'delimiter': ',',
