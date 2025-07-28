@@ -2,6 +2,9 @@ import pandas as pd
 import numpy as np
 import json
 import sys
+import glob
+import ast
+import re
 from uuid import uuid4
 from sklearn.metrics import ndcg_score
 from content_based_recs import content_based_recommendation
@@ -74,6 +77,8 @@ def get_precision_recall_at_k(user, test, rec_df, n):
     else:
         true_n = n
 
+    # print(f"true_n: {true_n}")
+
     pre_at_n = sum(doc_relevant[:true_n]) / len(doc_relevant[:true_n])
     rec_at_n = sum(doc_relevant[:true_n]) / len(relevant_appids)
 
@@ -88,15 +93,21 @@ def get_ndcg(user, train, test, rec_df, k=10):
     full_appid_lst = rec_df['appid'].sort_values().tolist()
     full_appid_lst = [i for i in full_appid_lst if i not in owned_games]
 
-    true_relevance = np.asarray([[1 if i in owned_games_test else 0 for i in full_appid_lst]])
-    pred_relevance = np.asarray([[
-        rec_df[rec_df['appid']==i]['score'].values[0] if i in rec_df['appid'].tolist() else 0 
-        for i in full_appid_lst
-    ]])
+    if len(full_appid_lst)>1:
+        true_relevance = np.asarray([[1 if i in owned_games_test else 0 for i in full_appid_lst]])
+        pred_relevance = np.asarray([[
+            rec_df[rec_df['appid']==i]['score'].values[0] if i in rec_df['appid'].tolist() else 0 
+            for i in full_appid_lst
+        ]])
 
-    ndcg_at_k = ndcg_score(true_relevance, pred_relevance, k=k)
+        # print(f"true_relevance: {true_relevance}")
+        # print(f"pred_relevance: {pred_relevance}")
 
-    # print(f"ndcg_at_k: {ndcg_at_k}")
+        ndcg_at_k = ndcg_score(true_relevance, pred_relevance, k=k)
+
+        # print(f"ndcg_at_k: {ndcg_at_k}")
+    else:
+        ndcg_at_k = 0
 
     return ndcg_at_k
     
@@ -146,7 +157,7 @@ def evaluate_content_based_recommendations(
 
         # print(f"full_rec_df:\n{full_rec_df}")
 
-        # top 10
+        # top top_n_recommendations
         rec_df = full_rec_df.head(top_n_recommendations)
         
         data_lst = [user]
@@ -159,7 +170,7 @@ def evaluate_content_based_recommendations(
             prec_k, rec_k = get_precision_recall_at_k(user, test, rec_df, top_n_recommendations)
             data_lst += [prec_k, rec_k]
         if return_ndcg: 
-            ndcg = get_ndcg(user, train, test, full_rec_df, k=top_n_recommendations)
+            ndcg = get_ndcg(user, train, test, rec_df, k=top_n_recommendations)
             data_lst.append(ndcg)
 
         data.append(tuple(data_lst))
@@ -199,8 +210,14 @@ def get_model():
 
     return llm
 
-def get_llm_recommendations(train, test, df):
+def get_llm_recommendations(train, test, df, unseen_only=False):
     train_data = {user: list(train[user].items()) for user in train}
+
+    if unseen_only:
+        complete_recommendations = {i.split("\\")[-1].split(".")[0] for i in glob.glob("llm_recommendations/*.json")}
+        unseen = set(train_data.keys()).difference(complete_recommendations)
+        train_data = {i: train_data[i] for i in train_data if i in unseen}
+    
     app_dict = df[['appid', 'name']].set_index('appid').to_dict()['name']
     # print(app_dict)
     
@@ -266,8 +283,12 @@ def get_llm_recommendations(train, test, df):
 
         Games In Corpus: {context}
 
-        Return this list of recommendations as a Python list with no other words. 
-        Sort this list from your strongest to weakest recommendation.
+        Return recommendations as a Python list of tuples where
+        the first element in the tuple is game's appid and the second element
+        is a score showing how much you recommend this game. Make sure each appid in this
+        list is unique. If you can't recommend 20 games, recommend as many as you can.
+        Return this list with no other words. Sort this list from your strongest to 
+        weakest recommendation.
         """
 
         # Creating prompt
@@ -276,8 +297,10 @@ def get_llm_recommendations(train, test, df):
         chain = prompt | llm
         try:
             response = chain.invoke({'context': retriever, 'games_played': train_data[user]})
-        except:
+        except Exception as e:
             print(f"Failed to get recommendations for User: {user}")
+            print(e)
+            assert False
             continue
 
         recommendation_dict[user] = response.content
@@ -354,37 +377,150 @@ def content_based_offline_eval():
 
         for n_recs in [1, 5, 10, 20]:
             print(f"Number of Reccommendations: {n_recs}")
-            hit_rate, mean_avg_prec = evaluate_content_based_recommendations(
+            hit_rate, mean_avg_prec, ndcg = evaluate_content_based_recommendations(
                 i, train, test, similarity_method="cosine", top_n_train_examples=5,
                 top_n_recommendations=n_recs, return_hit_rate=True, return_mean_avg_prec=True, 
-                return_ndcg=False
+                return_ndcg=True
             )
 
             print(f"================================================================")
 
-            data.append((name, n_recs, hit_rate, mean_avg_prec))
+            data.append((name, n_recs, hit_rate, mean_avg_prec, ndcg))
 
     df = pd.DataFrame(
         data, 
-        columns=['name', 'k', 'hit_rate', 'mean_avg_prec']
+        columns=['name', 'k', 'hit_rate', 'mean_avg_prec', 'ndcg']
     )
     now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     df.to_csv(f"offline_eval_results_{now_str}.csv", index=False)
 
-def collect_recommendations_llm():
+def collect_recommendations_llm(unseen_only=False):
     game_df = pd.read_csv("../../data/game_player_cnt_ranked_top_1k.csv")
     train, test = get_train_test()
-    get_llm_recommendations(train, test, game_df)
+    get_llm_recommendations(train, test, game_df, unseen_only=unseen_only)
+
+def get_game_appid(df, name):
+    temp_df = df[df['name']==name]
+    if not temp_df.empty:
+        appid = temp_df['appid'].values[0]
+    else:
+        appid = None
+    return appid
+
+def llm_recommendation_offline_eval(top_n_recommendations, return_hit_rate=True, return_mean_avg_prec=True, return_ndcg=True):
+    game_df = pd.read_csv("../../data/game_player_cnt_ranked_top_1k.csv")
+    train, test = get_train_test()
+
+    data = []
+    data_cols = ['userid']
+
+    if return_hit_rate: data_cols.append("hit")
+    if return_mean_avg_prec: data_cols += ['precision@k', 'recall@k']
+    if return_ndcg: data_cols.append('NDCG@k')
+
+    for user, games in test.items():
+        with open(f"llm_recommendations/{user}.json", "r") as f:
+            recommendations = json.load(f)
+
+        recommendation_str = recommendations[user].strip()
+        if recommendation_str[-2] != ")": recommendation_str = recommendation_str.replace("]", ")]")
+        if "assistant<|end_header_id|>" in recommendation_str: recommendation_str = recommendation_str.replace("assistant<|end_header_id|>", "")
+        if recommendation_str[-1] != "]": recommendation_str += "]"
+        
+        recommendations[user] = ast.literal_eval(recommendation_str)
+        recommendations[user] = sorted(
+            [i for i in recommendations[user] if isinstance(i, tuple) and i[0] is not None], 
+            key=lambda x: x[1], 
+            reverse=True
+        )
+
+        # ensure recommendations[user] has only two columns
+        recommendations[user] = [(i[0], i[1]) for i in recommendations[user]]
+
+        # print(f"recommendations[{user}]: {recommendations[user]}")
+
+        # create recommendation df
+        rec_df = pd.DataFrame(recommendations[user], columns=['appid', 'score'])
+
+        # top top_n_recommendations
+        rec_df = rec_df.head(top_n_recommendations)
+        
+        # print(f"rec_df:\n{rec_df}\n=================")
+
+        data_lst = [user]
+
+        # calculating metrics
+        if return_hit_rate: 
+            hit = recommendation_hit(user, test, rec_df)
+            data_lst.append(hit)
+        if return_mean_avg_prec: 
+            prec_k, rec_k = get_precision_recall_at_k(user, test, rec_df, top_n_recommendations)
+            data_lst += [prec_k, rec_k]
+        if return_ndcg: 
+            ndcg = get_ndcg(user, train, test, rec_df, k=top_n_recommendations)
+            data_lst.append(ndcg)
+
+        data.append(tuple(data_lst))
+
+    results_df = pd.DataFrame(data, columns=data_cols)
+    
+    print(f"results_df:\n{results_df}")
+
+    return_list = []
+
+    if return_hit_rate:
+        hit_rate = results_df[results_df['hit']].shape[0] / results_df.shape[0]
+        print(f"Hit Rate: {hit_rate}")
+        return_list.append(hit_rate)
+
+    if return_mean_avg_prec:
+        mean_avg_prec = np.mean(results_df['precision@k'].tolist())
+        print(f"Mean Avg Precision: {mean_avg_prec}")
+        return_list.append(mean_avg_prec)
+
+    if return_ndcg:
+        mean_ndcg_score = np.mean(results_df['NDCG@k'].tolist())
+        print(f"Mean NDCG@k: {mean_ndcg_score}")
+        return_list.append(mean_ndcg_score)
+    
+    return tuple(return_list)
+
+def llm_offline_eval():
+    data = []
+    for n_recs in [1, 5, 10, 20]:
+        print(f"Number of Reccommendations: {n_recs}")
+        
+        hit_rate, map, ndcg = llm_recommendation_offline_eval(n_recs)
+
+        print(f"================================================================")
+
+        data.append(("Llama-3.1 Recommendations", n_recs, hit_rate, map, ndcg))
+
+    df = pd.DataFrame(
+        data, 
+        columns=['name', 'k', 'hit_rate', 'mean_avg_prec', 'ndcg']
+    )
+
+    print(df)
+    now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    df.to_csv(f"llm_offline_eval_results_{now_str}.csv", index=False)
+
 
 if __name__ == "__main__":
 
     """Run this function to generate a CSV file with 
     results from running Offline Evaluation on several
     content-based recommendation models"""
-    # content_based_offline_eval()
+    content_based_offline_eval()
 
     """Run this function to generate recommendations
     for each user in our training data. These recommendations
     are saved to json files in the llm_recommendations/ folder"""
-    # collect_recommendations_llm()
+    # collect_recommendations_llm(unseen_only=True)
+
+    """Run this function to generate a CSV file with 
+    results from running Offline Evaluation on recommendations
+    provided by Llama 3.1 70b model"""
+    # llm_offline_eval()
+
     
