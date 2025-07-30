@@ -5,6 +5,7 @@ import sys
 import glob
 import ast
 import re
+import warnings
 from uuid import uuid4
 from sklearn.metrics import ndcg_score
 from content_based_recs import content_based_recommendation
@@ -19,11 +20,13 @@ from langchain.document_loaders import CSVLoader
 from langchain_chroma import Chroma
 from langchain_aws import BedrockEmbeddings
 from langchain_huggingface.embeddings import HuggingFaceEmbeddings
+from sklearn.preprocessing import MinMaxScaler
 
 sys.path.append("../data_processing/")
 
 from games import process_game_data
 
+warnings.filterwarnings("ignore")
 
 def get_train_test(verbose=False):
     with open("../../data/offline_evaluation/train.json", "r") as f:
@@ -505,13 +508,372 @@ def llm_offline_eval():
     now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     df.to_csv(f"llm_offline_eval_results_{now_str}.csv", index=False)
 
+def get_collaborative_filtering_data(train):
+    data = [(user, game, train[user][game]) for user in train for game in train[user]]
+
+    interaction_df = pd.DataFrame(data, columns=["user_steamid", "appid", "playtime_forever"])
+    interaction_df['appid'] = interaction_df['appid'].astype(int)
+    interaction_df = interaction_df.sort_values(by=["user_steamid", "appid"])
+
+    # Binarize playtime as implicit feedback (1 if played > x minutes)
+    interaction_df["interaction"] = (interaction_df["playtime_forever"] > 1200).astype(int)
+
+    # Pivot to a user-item matrix
+    user_item_matrix = interaction_df.pivot_table(
+        index="user_steamid", columns="appid", values="interaction", fill_value=0
+    )
+
+    # Compute item-item similarity using cosine similarity
+    item_user_matrix = user_item_matrix.T  # Transpose to get items x users
+    item_similarity = cosine_similarity(item_user_matrix)
+
+    # Build item similarity DataFrame for exploration
+    item_similarity_df = pd.DataFrame(
+        item_similarity, index=item_user_matrix.index, columns=item_user_matrix.index
+    )
+
+    return interaction_df, user_item_matrix, item_similarity_df
+
+def recommend_games_for_user(user_id, interaction_df, user_item_matrix, item_similarity_df, game_details_df, top_n=5):
+    # Get the user’s interaction vector
+    if user_id not in user_item_matrix.index:
+        print(f"User {user_id} not found.")
+        return []
+
+    #user_vector = user_item_matrix.loc[user_id]
+    #interacted_games = user_vector[user_vector > 0].index.tolist() # Only recommended? So more than X hours? Better to filter all played?
+    # Instead of using binarized matrix, use original interaction_df:
+    played_games = interaction_df[interaction_df["user_steamid"] == user_id]["appid"].unique()
+
+    # Store recommendation scores
+    scores = pd.Series(dtype=float)
+
+    for game in played_games:
+        similar_scores = item_similarity_df[game]
+        scores = scores.add(similar_scores, fill_value=0)
+
+    # Remove games the user has already interacted with
+    #scores = scores.drop(labels=interacted_games, errors="ignore")
+    # Remove all games the user ever played, not just liked ones
+    scores = scores.drop(labels=played_games, errors="ignore")
+
+
+    # Get top N recommendations
+    top_recommendations = scores.sort_values(ascending=False).head(top_n)
+    top_recommendations = pd.DataFrame(top_recommendations).reset_index().rename(columns={0: 'similarity_score'})
+    #print(top_recommendations)
+    top_recommendations = pd.merge(top_recommendations, game_details_df, on='appid')
+    #print(top_recommendations)
+    top_recommendations = top_recommendations[['appid','name','similarity_score']]
+
+    print(top_recommendations)
+    return top_recommendations
+
+def collaborative_offline_eval(
+    test, interaction_df, item_similarity_df, game_details_df, top_n=5,
+    return_hit_rate=True, return_mean_avg_prec=True, return_ndcg=True
+):
+    
+    data = []
+    data_cols = ['userid']
+    if return_hit_rate: data_cols.append("hit")
+    if return_mean_avg_prec: data_cols += ['precision@k', 'recall@k']
+    if return_ndcg: data_cols.append('NDCG@k')
+
+    for idx, user_id in enumerate(test):
+        if idx % 500 == 0:
+            print(f"{idx} of {len(test)}")
+
+        # Instead of using binarized matrix, use original interaction_df:
+        played_games = interaction_df[interaction_df["user_steamid"] == user_id]["appid"].unique()
+
+        # Store recommendation scores
+        scores = pd.Series(dtype=float)
+
+        for game in played_games:
+            similar_scores = item_similarity_df[game]
+            scores = scores.add(similar_scores, fill_value=0)
+
+        # Remove games the user has already interacted with
+        #scores = scores.drop(labels=interacted_games, errors="ignore")
+        # Remove all games the user ever played, not just liked ones
+        scores = scores.drop(labels=played_games, errors="ignore")
+
+        # Get top N recommendations
+        top_recommendations = scores.sort_values(ascending=False).head(top_n)
+        top_recommendations = pd.DataFrame(top_recommendations).reset_index().rename(columns={0: 'similarity_score'})
+        #print(top_recommendations)
+        top_recommendations = pd.merge(top_recommendations, game_details_df, on='appid')
+        #print(top_recommendations)
+        rec_df = top_recommendations[['appid','name','similarity_score']]
+        rec_df = rec_df.rename(columns={'similarity_score': 'score'})
+        
+        data_lst = [user_id]
+
+        # calculating metrics
+        if return_hit_rate: 
+            hit = recommendation_hit(user_id, test, rec_df)
+            data_lst.append(hit)
+        if return_mean_avg_prec: 
+            prec_k, rec_k = get_precision_recall_at_k(user_id, test, rec_df, top_n)
+            data_lst += [prec_k, rec_k]
+        if return_ndcg: 
+            ndcg = get_ndcg(user_id, train, test, rec_df, k=top_n)
+            data_lst.append(ndcg)
+
+        data.append(tuple(data_lst))
+
+    results_df = pd.DataFrame(data, columns=data_cols)
+    
+    print(f"results_df:\n{results_df}")
+
+    return_list = []
+
+    if return_hit_rate:
+        hit_rate = results_df[results_df['hit']].shape[0] / results_df.shape[0]
+        print(f"Hit Rate: {hit_rate}")
+        return_list.append(hit_rate)
+
+    if return_mean_avg_prec:
+        mean_avg_prec = np.mean(results_df['precision@k'].tolist())
+        print(f"Mean Avg Precision: {mean_avg_prec}")
+        return_list.append(mean_avg_prec)
+
+    if return_ndcg:
+        mean_ndcg_score = np.mean(results_df['NDCG@k'].tolist())
+        print(f"Mean NDCG@k: {mean_ndcg_score}")
+        return_list.append(mean_ndcg_score)
+
+    return tuple(return_list)
+
+def collaborative_offline_eval_multiple_k(
+    test, interaction_df, item_similarity_df, game_details_df,
+    return_hit_rate=True, return_mean_avg_prec=True, return_ndcg=True
+):
+    data = []
+    for n_recs in [1, 5, 10, 20]:
+        print(f"Number of Reccommendations: {n_recs}")
+        
+        hit_rate, map, ndcg = collaborative_offline_eval(
+            test, 
+            interaction_df,  
+            item_similarity_df, 
+            game_details_df, 
+            top_n=n_recs,
+            return_hit_rate=return_hit_rate, 
+            return_mean_avg_prec=return_mean_avg_prec, 
+            return_ndcg=return_ndcg,
+        )
+
+        print(f"================================================================")
+
+        data.append(("Memory-Based Collaborative Filtering", n_recs, hit_rate, map, ndcg))
+
+    df = pd.DataFrame(
+        data, 
+        columns=['name', 'k', 'hit_rate', 'mean_avg_prec', 'ndcg']
+    )
+
+    print(df)
+    now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    df.to_csv(f"collaborative_offline_eval_results_{now_str}.csv", index=False)
+
+def hybrid_model(
+    processed_game_data, train, test, interaction_df, 
+    item_similarity_df, game_details_df, similarity_method, weight, top_n_train_examples=None, 
+    top_n_recommendations=None, return_hit_rate=True, return_mean_avg_prec=True, 
+    return_ndcg=True
+):
+    users = list(train.keys())
+    data = []
+    data_cols = ['userid']
+    if return_hit_rate: data_cols.append("hit")
+    if return_mean_avg_prec: data_cols += ['precision@k', 'recall@k']
+    if return_ndcg: data_cols.append('NDCG@k')
+
+    if similarity_method == "cosine":
+        sim_df = pd.DataFrame(
+            cosine_similarity(processed_game_data), 
+            columns=processed_game_data.index, 
+            index=processed_game_data.index
+        )
+
+    for idx, user in enumerate(users):
+        if idx % 100 == 0:
+            print(f"{idx} of {len(users)}")
+
+        scaler = MinMaxScaler()
+
+        """Content Based Recommendations"""
+        # get appids from the train set
+        train_appids = sorted(
+            [(i, train[user][i]) for i in train[user]], 
+            key=lambda x: x[1],
+            reverse=True
+        )
+
+        train_appids = [int(i[0]) for i in train_appids]
+
+        if top_n_train_examples is not None:
+            train_appids = train_appids[:top_n_train_examples]
+
+        
+        full_rec_df = content_based_recommendation(
+            train_appids, # appids
+            processed_game_data, # processed_game_data
+            sim_df=sim_df,
+            top_n=None
+        )
+
+        # print(f"full_rec_df:\n{full_rec_df}")
+
+        # top top_n_recommendations
+        content_rec_df = full_rec_df.head(top_n_recommendations)
+        content_rec_df[['score']] = scaler.fit_transform(content_rec_df[['score']])
+        content_appids = set(content_rec_df['appid'])
+
+        # print(f"content_rec_df:\n{content_rec_df}")
+
+        """Collaborative Recommendations"""
+        # Instead of using binarized matrix, use original interaction_df:
+        played_games = interaction_df[interaction_df["user_steamid"] == user]["appid"].unique()
+
+        # Store recommendation scores
+        scores = pd.Series(dtype=float)
+
+        for game in played_games:
+            similar_scores = item_similarity_df[game]
+            scores = scores.add(similar_scores, fill_value=0)
+
+        # Remove all games the user ever played, not just liked ones
+        scores = scores.drop(labels=played_games, errors="ignore")
+
+        # Get top N recommendations
+        top_recommendations = scores.sort_values(ascending=False).head(top_n_recommendations)
+        top_recommendations = pd.DataFrame(top_recommendations).reset_index().rename(columns={0: 'similarity_score'})
+        top_recommendations = pd.merge(top_recommendations, game_details_df, on='appid')
+        collab_rec_df = top_recommendations[['appid','name','similarity_score']]
+        collab_rec_df = collab_rec_df.rename(columns={'similarity_score': 'score'})
+        collab_rec_df[['score']] = scaler.fit_transform(collab_rec_df[['score']])
+        collab_appids = set(collab_rec_df['appid'])
+
+        # print(f"collab_rec_df:\n{collab_rec_df}")
+
+        """Combining Models"""
+        content_rec_df['source'] = 'content-based'
+        collab_rec_df['source'] = 'collab'
+        combined_df = content_rec_df.merge(collab_rec_df, on="appid", how="outer", suffixes=('_content', '_collab'))
+        combined_df[['name_content', 'name_collab']] = combined_df[['name_content', 'name_collab']].replace({np.nan: None})
+        combined_df[['score_collab', 'score_content']] = combined_df[['score_collab', 'score_content']].fillna(0)
+
+        def compute_final_score(row):
+            return row['score_collab']*weight + row['score_content']*(1-weight)
+        combined_df['combined_score'] = combined_df.apply(compute_final_score, axis=1)
+        
+        def get_name(row):
+            if row['name_content'] is None:
+                return row['name_collab']
+            elif row['name_collab'] is None:
+                return row['name_content']
+            else:
+                return row['name_content']
+            
+        combined_df['name'] = combined_df.apply(get_name, axis=1)
+        rec_df = combined_df[['appid', 'name', 'combined_score']]
+        rec_df = rec_df.rename(columns={'combined_score': 'score'})
+
+        """Getting Results"""
+
+        # print(f"rec_df:\n{rec_df}")
+
+        data_lst = [user]
+
+        # calculating metrics
+        if return_hit_rate: 
+            hit = recommendation_hit(user, test, rec_df)
+            data_lst.append(hit)
+        if return_mean_avg_prec: 
+            prec_k, rec_k = get_precision_recall_at_k(user, test, rec_df, top_n_recommendations)
+            data_lst += [prec_k, rec_k]
+        if return_ndcg: 
+            ndcg = get_ndcg(user, train, test, rec_df, k=top_n_recommendations)
+            data_lst.append(ndcg)
+
+        data.append(tuple(data_lst))
+
+    results_df = pd.DataFrame(data, columns=data_cols)
+    
+    print(f"results_df:\n{results_df}")
+
+    return_list = []
+
+    if return_hit_rate:
+        hit_rate = results_df[results_df['hit']].shape[0] / results_df.shape[0]
+        print(f"Hit Rate: {hit_rate}")
+        return_list.append(hit_rate)
+
+    if return_mean_avg_prec:
+        mean_avg_prec = np.mean(results_df['precision@k'].tolist())
+        print(f"Mean Avg Precision: {mean_avg_prec}")
+        return_list.append(mean_avg_prec)
+
+    if return_ndcg:
+        mean_ndcg_score = np.mean(results_df['NDCG@k'].tolist())
+        print(f"Mean NDCG@k: {mean_ndcg_score}")
+        return_list.append(mean_ndcg_score)
+
+    return tuple(return_list)
+
+def hyperparameter_tuning_hybrid_model(weights, top_n_train_examples, top_n_recommendations):
+    train, test = get_train_test()
+    interaction_df, _, item_similarity_df = get_collaborative_filtering_data(train)
+    game_df = pd.read_csv("../../data/game_player_cnt_ranked_top_1k.csv")
+    game_details_df = pd.read_csv("../../data/top_1000_game_details.csv")
+    img_summary_df_v2 = pd.read_csv("../../data/top_1000_game_image_keywords.csv")
+    screenshot_summary_df = pd.read_csv("../../data/top_1000_game_screenshot_summary.csv")
+
+    game_data = process_game_data( # screenshot keywords
+        game_df, 
+        game_details_df, 
+        img_summary_df=None, 
+        img_summary_df_v2=img_summary_df_v2, 
+        screenshot_summary_df=screenshot_summary_df,
+        verbose=False, 
+        include_image_summary=False
+    )
+
+    data = []
+    for wt in weights:
+        for n_train in top_n_train_examples:
+            for n_recs in top_n_recommendations:
+                hit_rate, mean_avg_prec, ndcg = hybrid_model(
+                    game_data, 
+                    train, 
+                    test, 
+                    interaction_df, 
+                    item_similarity_df, 
+                    game_details_df,
+                    similarity_method='cosine', 
+                    weight=wt,
+                    top_n_train_examples=n_train,
+                    top_n_recommendations=n_recs,
+                )
+
+                data.append((wt, n_train, n_recs, hit_rate, mean_avg_prec, ndcg))
+
+    df = pd.DataFrame(
+        data, 
+        columns=['weight', 'num_train_examples', 'k', 'hit_rate', 'mean_avg_prec', 'ndcg']
+    )
+    now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    df.to_csv(f"hybrid_hyperparameter_tuning_{now_str}.csv", index=False)
+
 
 if __name__ == "__main__":
-
     """Run this function to generate a CSV file with 
     results from running Offline Evaluation on several
     content-based recommendation models"""
-    content_based_offline_eval()
+    # content_based_offline_eval()
 
     """Run this function to generate recommendations
     for each user in our training data. These recommendations
@@ -523,4 +885,26 @@ if __name__ == "__main__":
     provided by Llama 3.1 70b model"""
     # llm_offline_eval()
 
+    """Offline Evaluation: Collaborative Filtering"""
+    # train, test = get_train_test()
+    # interaction_df, user_item_matrix, item_similarity_df = get_collaborative_filtering_data(train)
+
+    # print(f"user_item_matrix:\n{user_item_matrix}")
+    # game_details_df = pd.read_csv("../../data/top_1000_game_details.csv")
+    # collaborative_offline_eval_multiple_k(
+    #     test, 
+    #     interaction_df, 
+    #     item_similarity_df, 
+    #     game_details_df,
+    #     return_hit_rate=True, 
+    #     return_mean_avg_prec=True, 
+    #     return_ndcg=True
+    # )
+    
+    """Hybrid Model"""
+    hyperparameter_tuning_hybrid_model(
+        weights=[0.99, 0.999], 
+        top_n_train_examples=[None, 5, 10], 
+        top_n_recommendations=[1, 5, 10, 20]
+    )
     
