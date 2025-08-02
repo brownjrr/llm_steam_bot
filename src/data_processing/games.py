@@ -8,27 +8,33 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing import normalize
 
 
-def process_game_data(game_df, details_df, img_summary_df=None, screenshot_summary_df=None, img_summary_df_v2=None, verbose=False, include_image_summary=False):
+def process_game_data(
+    game_df, details_df, img_summary_df=None, screenshot_summary_df=None, 
+    img_summary_df_v2=None, verbose=False, include_image_summary=False,
+    text_cols=None, numeric_cols=None
+):
     # Merge game data with details
     game_df = game_df[['appid']]
-    game_df = game_df.merge(details_df, left_on='appid', right_on='appid', how='inner')
+    game_df = game_df.merge(details_df, left_on='appid', right_on='appid', how='left')
+    game_df = game_df.drop_duplicates(subset=['appid'])
 
-    # filter out any records where type != 'game'
-    game_df = game_df[game_df['type']=='game']
+    # # filter out any records where type != 'game'
+    # game_df = game_df[game_df['type']=='game']
 
     # removing any games that haven't come out yet
-    game_df['coming_soon'] = game_df['release_date'].apply(lambda x: ast.literal_eval(x)['coming_soon'])
-    game_df = game_df[game_df['coming_soon']==False]
+    # game_df['coming_soon'] = game_df['release_date'].apply(lambda x: ast.literal_eval(x)['coming_soon'])
+    # game_df = game_df[game_df['coming_soon']==False]
 
     # creating release_year feature
     game_df['release_year'] = game_df['release_date'].apply(
         lambda x: pd.to_datetime(
-            ast.literal_eval(x)['date'], errors='coerce'
+            np.nan if not isinstance(x, str) and (x is None or np.isnan(x)) else ast.literal_eval(x)['date'], 
+            errors='coerce'
         ).year
     )
-
-    # dropping records with no release year
-    game_df = game_df.dropna(subset=['release_year'])
+    
+    # # dropping records with no release year
+    # game_df = game_df.dropna(subset=['release_year'])
 
     # processing recommendations column
     def process_recommendations(x):
@@ -101,7 +107,10 @@ def process_game_data(game_df, details_df, img_summary_df=None, screenshot_summa
     if img_summary_df_v2 is not None:
         # grabbing df with header image summary
         def process_header_images_v2(id):
-            summary = img_summary_df_v2[img_summary_df_v2['appid']==id]['image_keywords'].values[0]
+            try:
+                summary = img_summary_df_v2[img_summary_df_v2['appid']==id]['image_keywords'].values[0]
+            except IndexError:
+                summary = None
             return summary
         # processing header images
         game_df['header_image_summary'] = game_df['appid'].apply(process_header_images_v2)
@@ -109,36 +118,42 @@ def process_game_data(game_df, details_df, img_summary_df=None, screenshot_summa
     if screenshot_summary_df is not None:
         # grabbing df with header image summary
         def process_screenshots(id):
-            summary = screenshot_summary_df[screenshot_summary_df['appid']==id]['screenshot_summary'].values[0]
-            if summary is not None:
+            try:
+                summary = screenshot_summary_df[screenshot_summary_df['appid']==id]['screenshot_summary'].values[0]
+            except IndexError:
+                summary = None
+
+            if summary is not None and not isinstance(summary, type(np.nan)):
                 summary = " ".join(ast.literal_eval(summary))
             return summary
         # processing screenshots
         game_df['screenshot_summary'] = game_df['appid'].apply(process_screenshots)
 
-    text_cols = [
-        'name',
-        'about_the_game',
-        'developers',
-        'categories',
-        'genres',
-        'publishers',
-    ]
+    if text_cols is None:
+        text_cols = [
+            'name',
+            'about_the_game',
+            'developers',
+            'categories',
+            'genres',
+            'publishers',
+        ]
 
-    if include_image_summary or img_summary_df_v2 is not None: text_cols += ['header_image_summary']
-    if screenshot_summary_df is not None: text_cols += ['screenshot_summary']
+        if include_image_summary or img_summary_df_v2 is not None: text_cols += ['header_image_summary']
+        if screenshot_summary_df is not None: text_cols += ['screenshot_summary']
 
-    numeric_cols = [
-        'is_free',
-        # 'ratings', # FIXME: handling this requires some thought. Exclude for now
-        'recommendations',
-        'required_age',
-        'release_year'
-    ]
+    if numeric_cols is None:
+        numeric_cols = [
+            'is_free',
+            # 'ratings', # FIXME: handling this requires some thought. Exclude for now
+            'recommendations',
+            'required_age',
+            'release_year'
+        ]
 
     def preprocess_text_column(x):
         # impute missing data
-        x = "" if x is None else x
+        x = "" if x is None or isinstance(x, type(np.nan)) else x
 
         # cast to lowercase
         try:
@@ -156,19 +171,20 @@ def process_game_data(game_df, details_df, img_summary_df=None, screenshot_summa
     for col in text_cols:
         game_df[col] = game_df[col].apply(preprocess_text_column)
 
-    # combine text columns
-    game_df['text'] = game_df[text_cols[0]]
-    for col in text_cols[1:]:
-        game_df['text'] += " " + game_df[col]
+    if text_cols is not None:
+        # combine text columns
+        game_df['text'] = game_df[text_cols[0]]
+        for col in text_cols[1:]:
+            game_df['text'] += " " + game_df[col]
 
-    # vectorize text column
-    vectorizer = TfidfVectorizer()
-    text_vec_df = pd.DataFrame(vectorizer.fit_transform(game_df['text']).toarray())
+        # vectorize text column
+        vectorizer = TfidfVectorizer()
+        text_vec_df = pd.DataFrame(vectorizer.fit_transform(game_df['text']).toarray())
 
     # create df from numeric cols
     num_df = game_df[['appid']+numeric_cols].fillna(0).set_index("appid")
 
-    num_df['is_free'] = num_df['is_free'].astype(int)
+    if 'is_free' in numeric_cols: num_df['is_free'] = num_df['is_free'].astype(int)
     num_df = pd.DataFrame(normalize(num_df), columns=num_df.columns, index=num_df.index)
 
     # concatenate text_vec_df with numeric cols
