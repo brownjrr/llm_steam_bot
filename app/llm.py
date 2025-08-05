@@ -75,12 +75,14 @@ def get_reviews(app_id=None):
 
     return [(i[0], i[1]) for i in df[['appid', 'review']].values]
 
-def get_model():
+def get_model(temp=None):
     print("Grabbing Model")
 
     # creating model
     llm = ChatBedrockConverse(
-        model="us.meta.llama3-1-70b-instruct-v1:0", region_name="us-east-1"
+        model="us.meta.llama3-1-70b-instruct-v1:0",
+        region_name="us-east-1",
+        temperature=temp
     )
 
     return llm
@@ -109,7 +111,7 @@ def summarize_reviews(appid, llm):
         
         return ret_str
     
-    retriever = get_review_retriever(get_reviews(), skip_populating=True, filter_app_id=str(appid))
+    retriever = get_review_retriever(skip_populating=True, filter_app_id=str(appid))
 
     chain = {"context": retriever, "question": RunnablePassthrough()} | prompt | llm.with_structured_output(GameReviewSummary) | RunnableLambda(process_game_summary_review)
 
@@ -358,7 +360,7 @@ def get_game_id_retriever(skip_populating=False):
 
     return retriever
 
-def get_review_retriever(reviews, skip_populating=False, filter_app_id=None):
+def get_review_retriever(reviews=None, skip_populating=False, filter_app_id=None):
     print(f"Grabbing Review Retriever for App ID: {filter_app_id}")
 
     embeddings = HuggingFaceEmbeddings()
@@ -554,7 +556,7 @@ def create_and_save_review_summary_chain(llm):
         sent = sentence.content.strip()
         return ast.literal_eval(sent)
     
-    chain = {"context": get_review_retriever(get_reviews(), skip_populating=True), "question": RunnablePassthrough()} | prompt | llm | RunnableLambda(convert_to_json)
+    chain = {"context": get_review_retriever(skip_populating=True), "question": RunnablePassthrough()} | prompt | llm | RunnableLambda(convert_to_json)
 
     # saving chain
     chain_dict = dumpd(chain)
