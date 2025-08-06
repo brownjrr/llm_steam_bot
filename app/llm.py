@@ -75,14 +75,15 @@ def get_reviews(app_id=None):
 
     return [(i[0], i[1]) for i in df[['appid', 'review']].values]
 
-def get_model(temp=None):
+def get_model(temp=None, top_p=None):
     print("Grabbing Model")
 
     # creating model
     llm = ChatBedrockConverse(
         model="us.meta.llama3-1-70b-instruct-v1:0",
         region_name="us-east-1",
-        temperature=temp
+        temperature=temp,
+        top_p=top_p
     )
 
     return llm
