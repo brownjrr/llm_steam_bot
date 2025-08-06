@@ -6,12 +6,14 @@ import re
 import json
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing import normalize
+from sklearn.decomposition import TruncatedSVD
 
 
 def process_game_data(
     game_df, details_df, img_summary_df=None, screenshot_summary_df=None, 
     img_summary_df_v2=None, verbose=False, include_image_summary=False,
-    text_cols=None, numeric_cols=None
+    text_cols=None, numeric_cols=None, preprocess_text=True, normalize_numeric=True,
+    svd_k=100, svd_n_iter=10, tfidf_max_df=1.0, tfidf_min_df=1, tfidf_stop_words=None
 ):
     # Merge game data with details
     game_df = game_df[['appid']]
@@ -43,6 +45,31 @@ def process_game_data(
         else:
             return ast.literal_eval(x)['total']
     game_df['recommendations'] = game_df['recommendations'].apply(process_recommendations)
+
+    # preprocessing metacritic column
+    def process_metacritic_score(x):
+        if isinstance(x, str):
+            score_dict = ast.literal_eval(x)
+            return float(score_dict['score'])
+        else:
+            return np.nan
+    game_df['metacritic'] = game_df['metacritic'].apply(process_metacritic_score)
+
+    # preprocessing dl column
+    def process_num_dlc(x):
+        if isinstance(x, str):
+            return len(ast.literal_eval(x))
+        else:
+            return 0
+    game_df['num_dlc'] = game_df['dlc'].apply(process_num_dlc)
+
+    # preprocessing dl column
+    def process_platforms(x):
+        if isinstance(x, str):
+            return " ".join(list(ast.literal_eval(x).keys()))
+        else:
+            return ""
+    game_df['platforms'] = game_df['platforms'].apply(process_platforms)
 
     # processing the developers column
     def process_developers(x):
@@ -148,7 +175,8 @@ def process_game_data(
             # 'ratings', # FIXME: handling this requires some thought. Exclude for now
             'recommendations',
             'required_age',
-            'release_year'
+            'release_year',
+            'metacritic',
         ]
 
     def preprocess_text_column(x):
@@ -167,32 +195,52 @@ def process_game_data(
 
         return x
 
-    # clean text columns
-    for col in text_cols:
-        game_df[col] = game_df[col].apply(preprocess_text_column)
+    if preprocess_text:
+        # clean text columns
+        for col in text_cols:
+            game_df[col] = game_df[col].apply(preprocess_text_column)
 
-    if text_cols is not None:
+    if text_cols is not None and preprocess_text:
         # combine text columns
         game_df['text'] = game_df[text_cols[0]]
         for col in text_cols[1:]:
             game_df['text'] += " " + game_df[col]
 
         # vectorize text column
-        vectorizer = TfidfVectorizer()
+        vectorizer = TfidfVectorizer(max_df=tfidf_max_df, min_df=tfidf_min_df, stop_words=tfidf_stop_words)
         text_vec_df = pd.DataFrame(vectorizer.fit_transform(game_df['text']).toarray())
+
+        # 2. Truncated SVD to k dimensions
+        svd = TruncatedSVD(n_components=svd_k, n_iter=svd_n_iter, random_state=42)
+        text_vec_df = pd.DataFrame(svd.fit_transform(text_vec_df))  # item embeddings
 
     # create df from numeric cols
     num_df = game_df[['appid']+numeric_cols].fillna(0).set_index("appid")
 
     if 'is_free' in numeric_cols: num_df['is_free'] = num_df['is_free'].astype(int)
-    num_df = pd.DataFrame(normalize(num_df), columns=num_df.columns, index=num_df.index)
 
-    # concatenate text_vec_df with numeric cols
-    final_game_df = pd.DataFrame(
-        data=np.hstack([num_df, text_vec_df]),
-        columns=numeric_cols+list(text_vec_df.columns),
-        index=num_df.index
-    )
+    if normalize_numeric:
+        num_df = pd.DataFrame(normalize(num_df), columns=num_df.columns, index=num_df.index)
+
+    if preprocess_text:
+        # concatenate text_vec_df with numeric cols
+        final_game_df = pd.DataFrame(
+            data=np.hstack([num_df, text_vec_df]),
+            columns=numeric_cols+list(text_vec_df.columns),
+            index=num_df.index
+        )
+    else:
+        game_df['text'] = game_df[[i for i in text_cols if i != "name"]].replace(np.nan, None).apply(
+            lambda row: " ".join([i if i is not None else "" for i in row.values]), 
+            axis=1
+        ).to_frame()
+
+        # concatenate text_vec_df with numeric cols
+        final_game_df = pd.DataFrame(
+            data=np.hstack([num_df, game_df[['name', 'text']]]),
+            columns=numeric_cols+['name', 'text'],
+            index=num_df.index
+        )
     
     if verbose:
         print(final_game_df)
