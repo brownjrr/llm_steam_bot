@@ -16,7 +16,8 @@ from langchain_aws.chat_models import ChatBedrockConverse
 from langchain_huggingface.embeddings import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
-from langchain.document_loaders import CSVLoader
+#from langchain.document_loaders import CSVLoader
+from langchain_community.document_loaders import CSVLoader
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 from langchain_core.load import dumpd
@@ -27,9 +28,11 @@ from langchain_core.messages import ToolMessage
 from sklearn.metrics.pairwise import cosine_similarity
 
 sys.path.append("../src/data_processing/")
+sys.path.append("../src/recommender/")
 
 from games import process_game_data
-
+# Import memory-based recommender logic
+from collaborative_memory_based import recommend_games_for_user 
 
 GAME_NOT_FOUND_STR = "<GAME_NOT_FOUND>"
 
@@ -257,6 +260,12 @@ class SteamBotModel():
             | RunnableLambda(load_app_json_str)
         )
 
+        # Check for a SteamID (17-digit number as standard)
+        steamid_matches = re.findall(r'\b\d{17}\b', user_prompt)
+        if steamid_matches:
+            steamid = int(steamid_matches[0])
+            return get_user_recommendation({"user_steamid": steamid})
+
         # Asking questions
         response = (game_name_chain | appid_chain.map()).invoke(user_prompt)
         
@@ -291,8 +300,8 @@ Here are some games we do have that may be similar to your prompt:
 """
 
         for game in response:
-            agent = create_react_agent(self.llm, [get_game_info, get_game_recommendation])
-
+            #agent = create_react_agent(self.llm, [get_game_info, get_game_recommendation])
+            agent = create_react_agent(self.llm, [get_game_info, get_game_recommendation, get_user_recommendation])
             system_message = {"role": "system", "content": f"The game that this user mentions has an appid={game['appid']}"}
             input_message = {"role": "user", "content": user_prompt}
             agent_response = agent.invoke({
@@ -561,3 +570,57 @@ def create_and_save_review_summary_chain(llm):
 
     with open("./saved_chains/review_summary_chain.json", "w+") as f:
         json.dump(chain_dict, f)
+
+@tool("get_user_recommendation")
+def get_user_recommendation(user_steamid: int):
+    """
+    Returns personalized game recommendations based on a user's Steam ID.
+    """
+    #import pandas as pd
+
+    try:
+        # Load pre calculated memory based data from CSVs
+        user_item_matrix = pd.read_csv("../data/memory_based_user_item_matrix_1000_games.csv", index_col=0)
+        item_similarity_df = pd.read_csv("../data/df_memory_based_item_similarity_1000_games.csv", index_col=0)
+        interaction_df = pd.read_csv("../data/df_memory_based_interaction_1000_games.csv")
+        df_top_n_game_details = pd.read_csv("../data/top_1000_game_details.csv")
+        df_users_owned_games = pd.read_csv("../data/df_users_owned_games.csv")
+
+        # format issues
+        if user_item_matrix.index.dtype in ['float64', 'float32']:
+            user_item_matrix.index = user_item_matrix.index.astype("int64")
+        if user_item_matrix.columns.dtype in ['float64', 'float32']:
+            user_item_matrix.columns = user_item_matrix.columns.astype("int64")
+        if item_similarity_df.index.dtype in ['float64', 'float32']:
+            item_similarity_df.index = item_similarity_df.index.astype("int64")
+        if item_similarity_df.columns.dtype in ['float64', 'float32']:
+            item_similarity_df.columns = item_similarity_df.columns.astype("int64")
+        item_similarity_df.columns = item_similarity_df.columns.astype(int)
+        item_similarity_df.index = item_similarity_df.index.astype(int)
+
+        # Call recommender function
+        recommendations = recommend_games_for_user(
+            user_id=user_steamid,
+            interaction=interaction_df,
+            user_item_matrix=user_item_matrix,
+            item_similarity_df=item_similarity_df,
+            df_top_n_game_details=df_top_n_game_details,
+            df_users_owned_games=df_users_owned_games,
+            show_output=False,
+            top_n=10
+        )
+
+        if len(recommendations) == 0:
+            return f"Sorry, no recommendations found for Steam user ID `{user_steamid}`."
+
+        output = f"## 🎮 Recommendations for Steam Profile `{user_steamid}`\n\n"
+        output += "| Game Title | Similarity Score |\n|------------|------------------|\n"
+
+        for _, row in recommendations.iterrows():
+            output += f"| {row['name']} | {row['similarity_score']:.3f} |\n"
+
+        return output
+
+    except Exception as e:
+        print(f"Error: {e}")
+        return f"Something went wrong fetching recommendations for Steam ID `{user_steamid}`"
