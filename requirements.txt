@@ -26,6 +26,7 @@ confection==0.1.5
 cymem==2.0.11
 dash==3.1.1
 dash-bootstrap-components==2.0.3
+dash-ag-grid==32.3.1
 dataclasses-json==0.6.7
 debugpy==1.8.14
 decorator==5.2.1
