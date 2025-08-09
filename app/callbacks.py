@@ -98,16 +98,18 @@ def add_ai_response_loading(user_prompt):
     Input("ai_loading_message_trigger", "children"),
     State({'type': 'ai_prompt_response', 'index': ALL}, "id"),
     State("last_user_prompt", "data"),
+    State("user_profile_dropdown", "value"),
     prevent_initial_call=True,
 )
-def populate_ai_response_bubble(_, message_ids, user_prompt):
+def populate_ai_response_bubble(_, message_ids, user_prompt, userid):
     id = user_prompt['id']
-
     response = None
+    response = llm.invoke(userid, user_prompt['prompt'])
     try:
-        response = llm.invoke(user_prompt['prompt'])
+        # response = llm.invoke(userid, user_prompt['prompt'])
+        pass
     except Exception as e:
-        print(e)
+        print(f"Error Encountered While Invoking LLM:\nError: {e}")
         
         response = """
 ## ⚠️ Error Encountered
@@ -317,3 +319,10 @@ def show_hide_info_area(rows):
         children = None
 
     return patch, children
+
+@callback(
+    Output("user_id_display", "children"),
+    Input("user_profile_dropdown", "value"),
+)
+def update_user_id_display(value):
+    return f"{str(value)}"

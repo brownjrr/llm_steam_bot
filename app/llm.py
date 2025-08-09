@@ -7,7 +7,6 @@ import re
 import textwrap
 import json
 import pickle
-import textwrap
 import os
 from io import BytesIO
 from pydantic import BaseModel, Field
@@ -16,51 +15,72 @@ from langchain_aws.chat_models import ChatBedrockConverse
 from langchain_huggingface.embeddings import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
-#from langchain.document_loaders import CSVLoader
 from langchain_community.document_loaders import CSVLoader
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 from langchain_core.load import dumpd
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_core.tools import tool
+from langchain_core.tools import tool, InjectedToolArg
 from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import ToolMessage
 from sklearn.metrics.pairwise import cosine_similarity
+from typing import List
 
 sys.path.append("../src/data_processing/")
 sys.path.append("../src/recommender/")
 
 from games import process_game_data
-# Import memory-based recommender logic
 from collaborative_memory_based import recommend_games_for_user 
 
 GAME_NOT_FOUND_STR = "<GAME_NOT_FOUND>"
 
-def content_based_recommendation(appid, X, similarity_method=None, top_n=5):
-    if similarity_method is None or similarity_method not in ['cosine']:
+# content_sim_df
+
+
+def content_based_recommendation(appids, X, sim_df=None, similarity_method=None, top_n=10):
+    if similarity_method is not None and similarity_method not in ['cosine']:
         assert False, "This function is not capable of handling this similarity method"
 
-    if similarity_method == 'cosine':
-        sim_df = pd.DataFrame(cosine_similarity(X), columns=X.index, index=X.index)
+    if sim_df is None:
+        if similarity_method == 'cosine':
+            sim_df = pd.DataFrame(cosine_similarity(X), columns=X.index, index=X.index)
     
+    # removing any unfound app ids from appids list
+    errant_ids = []
+    for _id in appids:
+        if _id not in sim_df.columns:
+            errant_ids.append(_id)
+    
+    if len(errant_ids) > 0: 
+        # print(f"Could not find the following ids: {errant_ids}")
+        for _id in errant_ids:
+            appids.remove(_id)
+
     # get similarities for appid, sort by similarity score
-    app_similarities = sim_df[appid].sort_values(ascending=False)
+    app_similarities = sim_df[appids]
 
-    # grab top n apps
-    app_similarities = app_similarities[:1+top_n].to_frame()
+    # average app_similarities columns
+    mean_app_similarities = app_similarities.mean(axis=1).sort_values(ascending=False)
 
-    # change name
+    # # grab top n apps
+    # app_similarities = mean_app_similarities[:len(appids)+top_n].to_frame()
+    app_similarities = mean_app_similarities.to_frame()
+
+    # change name of similarity score column
     app_similarities.columns = ["score"]
-
     app_similarities = app_similarities.reset_index()
 
     # get app names
     game_df = pd.read_csv("../data/game_player_cnt_ranked_top_1k.csv")[['appid', 'name']]
-    app_similarities = app_similarities.merge(game_df, on=['appid'], how='inner')
+    app_similarities = app_similarities.merge(game_df, on=['appid'], how='left')
 
     # separate app row from suggestion rows
-    app_row = app_similarities[:1]
-    app_similarities = app_similarities[1:]
+    app_rows = app_similarities[app_similarities['appid'].isin(appids)]
+    app_similarities = app_similarities[~app_similarities['appid'].isin(appids)]
+    if top_n is not None: app_similarities = app_similarities[:top_n]
+
+    if app_similarities['score'].isna().all():
+       app_similarities['score'] = len(app_similarities) - app_similarities.index
 
     return app_similarities
 
@@ -83,7 +103,9 @@ def get_model():
 
     # creating model
     llm = ChatBedrockConverse(
-        model="us.meta.llama3-1-70b-instruct-v1:0", region_name="us-east-1"
+        # model="us.meta.llama3-1-70b-instruct-v1:0", region_name="us-east-1"
+        model="us.meta.llama4-maverick-17b-instruct-v1:0",
+        region_name="us-east-1"
     )
 
     return llm
@@ -126,11 +148,16 @@ def summarize_reviews(appid, llm):
 @tool("get_game_info")
 def get_game_info(appid: int):
     """
-    A tool which returns information related to a video game on Steam.
+    A tool which returns information related to a video game on Steam, including a
+    summary of its Steam reviews.
 
     Examples:
-    1. If the user asks about the game "Left 4 Dead 2" and you find this game's 
+    1. If the user asks for information about the game "Left 4 Dead 2" and you find this game's 
     appid to be 550, you would specify the appid as 550
+    2. If the user says "Tell me more about Left 4 Dead 2" and you find Left 4 Dead 2 
+    to have an appid of 550, you would specify the appid as 550
+    3. If the user says "Tell me about the reception of Left 4 Dead 2" and you find Left 4 Dead 2 
+    to have an appid of 550, you would specify the appid as 550
     """
     game_details_df = pd.read_csv(f"../data/top_1000_game_details.csv")
     
@@ -162,23 +189,29 @@ def get_game_info(appid: int):
     return final_message
 
 @tool("get_game_recommendation")
-def get_game_recommendation(appid: int):
+def get_game_recommendation(appids) -> str: 
     """
     A tool which returns recommendations based on a given video game.
 
     Examples:
-    1. If the user asks for recommendations based on the game "Left 4 Dead 2" 
-    and you find this game's appid to be 550, you would specify the appid as 550
+    1. If the user asks for recommendations similar to the game "Left 4 Dead 2" 
+    and you find this game's appid to be 550, you would specify appids as [550]
+    2. If the user asks for recommendations similar to the games "Left 4 Dead 2" 
+    and "Dota 2" and you find this game's appids to be 550 and 570, respectively, 
+    you would specify appids as [550, 570]
     """
-    game_df = pd.read_csv("../data/game_player_cnt_ranked_top_1k.csv")
-    game_details_df = pd.read_csv("../data/top_1000_game_details.csv")
-    img_summary_df = pd.read_csv("../data/top_1000_game_image_summary.csv")
-    
-    df = process_game_data(game_df, game_details_df, img_summary_df=img_summary_df, verbose=False, include_image_summary=True)
-    num_games = 5
-    recs_df = content_based_recommendation(appid, df, similarity_method='cosine', top_n=num_games)
 
-    game_str = str(game_details_df[game_details_df['appid'] == appid]['name'].values[0])
+    if isinstance(appids, str): appids = ast.literal_eval(appids)
+    
+    df = pd.read_csv("../data/processed_game_data.csv")
+    game_details_df = pd.read_csv("../data/top_1000_game_details.csv")
+    sim_df = pd.read_csv("../data/game_content_similarity.csv")
+    sim_df = sim_df.set_index("appid")
+    sim_df.columns = [int(i) for i in sim_df.columns]
+
+    num_games = 5
+    recs_df = content_based_recommendation(appids, df, sim_df=sim_df, top_n=num_games)
+    game_str = ", ".join([str(game_details_df[game_details_df['appid'] == appid]['name'].values[0]) for appid in appids])
 
     final_message = f"""## 🎮 Similar Games to {game_str}
 
@@ -209,6 +242,10 @@ class GameReviewSummary(BaseModel):
     # other_features: str = Field(description=f"{desc_beginning} any other features")
     sentiment: str = Field(description=f"A short description of the overall sentiment of the game, based on reviews")
 
+class UserRecommendationAnswer(BaseModel):
+    answer: str = Field(description="Answer to the question: Yes or No")
+    explanation: str = Field(description="Reason for answering Yes or No to the question")
+
 class SteamBotModel():
     def __init__(self, llm=None, reviews=None, populate_vector_stores=False):
         self.llm = llm
@@ -220,7 +257,7 @@ class SteamBotModel():
             raise Exception("No tools were used in the chain")
         return msg
 
-    def invoke(self, user_prompt):
+    def invoke(self, user_profile_id, user_prompt):
         """Finding name of game referenced by user"""
 
         template = """
@@ -228,11 +265,12 @@ class SteamBotModel():
 
             Prompt: {prompt}
 
-            Return as List of Strings, with no other text
+            Return as List of Strings or an empty list (e.g. []), with no other text. Only use double quotes (") around Strings.
         """
-
+        
         def load_json_str(ai_message):
-            return json.loads(ai_message.content)
+            print(f"game name chain ai_message:\n{ai_message.content}")
+            return json.loads(ai_message.content.replace("```json", "").replace("```", ""))
         
         retriever = get_game_data_retriever(skip_populating=True)
 
@@ -244,32 +282,33 @@ class SteamBotModel():
         )
 
         def load_app_json_str(ai_message):
+            print(f"load_app_json_str ai_message:\n{ai_message.content}")
+            
             if GAME_NOT_FOUND_STR in ai_message.content:
                 return GAME_NOT_FOUND_STR
             
-            return json.loads(ai_message.content)
-
+            return json.loads(ai_message.content.replace("```json", "").replace("```", ""))
+        
+        template = "Find the appid of the following game in our corpus, given the following context:\n\nGame: '{game}'\n\nContext:{context}" \
+                "\n\nReturn results as a JSON dictionary with keys `name` and `appid`. " \
+                f"If you don't think this game exists in our corpus, return the following string: '{GAME_NOT_FOUND_STR}'.\n " \
+                "If it seems the user wants recommendations based on a profile, return an empty Python list (e.g. [])\n\n" \
+                "DO NOT return python code."
+        
         appid_chain = (
             {"context": retriever, "game": RunnablePassthrough()}
-            | ChatPromptTemplate.from_template(
-                "Return the `appid` of game '{game}' given the following context: {context}" \
-                "\n\nReturn answer as a JSON dictionary with keys `name` and `appid`." \
-                f"If you can't find the app_id of this game, return the following string: '{GAME_NOT_FOUND_STR}'"
-            )
+            | ChatPromptTemplate.from_template(template)
             | self.llm
             | RunnableLambda(load_app_json_str)
         )
 
-        # Check for a SteamID (17-digit number as standard)
-        steamid_matches = re.findall(r'\b\d{17}\b', user_prompt)
-        if steamid_matches:
-            steamid = int(steamid_matches[0])
-            return get_user_recommendation({"user_steamid": steamid})
-
         # Asking questions
         response = (game_name_chain | appid_chain.map()).invoke(user_prompt)
+
+        print(f"response:\n{response}")
         
-        if isinstance(response, list) and all([i == GAME_NOT_FOUND_STR for i in response]):
+        # Error Handling: Could Not Find Game(s)
+        if isinstance(response, list) and len(response)>=1 and all([i == GAME_NOT_FOUND_STR for i in response]):
             similar_game_chain = (
                 {"context": retriever, "game": RunnablePassthrough()}
                 | ChatPromptTemplate.from_template(
@@ -281,32 +320,91 @@ class SteamBotModel():
             )
 
             response = (game_name_chain | similar_game_chain.map()).invoke(user_prompt)
-
+            
             similar_game_list = []
             for item in response:
                 similar_game_list += [i.strip() for i in item.content.strip().split(",")]
 
             similar_game_list = ''.join(f'- **{game}**\n' for game in similar_game_list)
             
-            return f"""
-## 🎮 Game Not Found  
-We couldn't find the game you were looking for based on your prompt.
+            return "## 🎮 Game Not Found\n" \
+            "We couldn't find the game you were looking for based on your prompt.\n\n" \
+            "Here are some games we do have that may be similar to your prompt:\n\n---\n\n" \
+            f"{similar_game_list}"
+        
+        # User Profile Recommendations
+        if len(response) == 0:
+            profile_recs_chain = (
+                ChatPromptTemplate.from_template(
+                    "Is the following prompt seeking recommendations either for themselves or for a third party profile?" \
+                    "Return your answer as a JSON dictionary with keys `answer` which takes on 'Yes' " \
+                    "or 'No' and `explanation` which is the explanation for your answer.\n\n" \
+                    "Prompt: {prompt}"
+                )
+                | self.llm.with_structured_output(UserRecommendationAnswer)
+            )
 
-Here are some games we do have that may be similar to your prompt:
+            profile_rec_response = profile_recs_chain.invoke(user_prompt)
+            print(f"profile_rec_response:\n{profile_rec_response}")
 
----
+            if profile_rec_response.answer == "Yes":
+                user_id_chain = (
+                    ChatPromptTemplate.from_template(
+                        "Extract the user id (with no other text) from the following prompt. If no user id" \
+                        f"is found, return the following string: '{user_profile_id}'. \n\n" \
+                        "Prompt: {prompt}"
+                    )
+                    | self.llm
+                )
 
-{similar_game_list}
-"""
+                user_id_response = user_id_chain.invoke(user_prompt).content.strip()
+                print(f"user_id_response:\n{user_id_response}")
 
-        for game in response:
-            #agent = create_react_agent(self.llm, [get_game_info, get_game_recommendation])
-            agent = create_react_agent(self.llm, [get_game_info, get_game_recommendation, get_user_recommendation])
-            system_message = {"role": "system", "content": f"The game that this user mentions has an appid={game['appid']}"}
-            input_message = {"role": "user", "content": user_prompt}
-            agent_response = agent.invoke({
-                "messages": [system_message, input_message],
-            })
+                if user_id_response != "None":
+                    agent = create_react_agent(self.llm, [get_user_recommendation])
+                    system_message = {"role": "system", "content": f"User is asking about the profile with user_steamid={user_id_response}"}
+                    input_message = {"role": "user", "content": user_prompt}
+                    agent_response = agent.invoke({
+                        "messages": [system_message, input_message],
+                        "user_steamid": int(user_id_response)
+                    }, {"recursion_limit": 100})
+
+                    print(f"agent_response:\n{agent_response}")
+
+                    return [msg for msg in agent_response['messages'] if isinstance(msg, ToolMessage)][-1].content
+                else:
+                    df = pd.read_csv("../data/game_player_cnt_ranked_top_1k.csv").head(10)
+
+                    final_message = "I don't have your gaming history, so here are some popular " \
+                    "Steam games\n\n## 🎮 Popular Games\n" \
+                    "| Game Title | Player Count |\n" \
+                    "|------------|------------------|\n"
+
+                    for _, row in df.iterrows():
+                        final_message += f"| {row['name']} | {row['player_count']:,} |\n"
+
+                    # return "If you select a profile, I can give you recommendations based on your" \
+                    # " gaming history. Otherwise, give me some examples of games you like and I can" \
+                    # "come up with a few recommendations."
+                    return final_message
+
+        # Getting game recommendations or game review summary
+        appids = [str(game['appid']) for game in response]
+        appids_str = ", ".join(appids)
+        agent = create_react_agent(self.llm, [get_game_info, get_game_recommendation])
+        system_message = {
+            "role": "system", 
+            "content": f"The user mentions the following game(s) with appid(s): " \
+            f"{appids_str}. If the user asks for recommendations, run get_game_recommendation()." \
+            "If the users asks for info about a game, run get_game_info()."
+        }
+        input_message = {"role": "user", "content": user_prompt}
+        agent_response = agent.invoke({
+            "messages": [system_message, input_message],
+        }, {"recursion_limit": 100})
+
+        # Ensure only the last ToolMessage is included in agent_response['messages']
+        agent_response['messages'] = [i for i in agent_response['messages'] if isinstance(i, ToolMessage)][-1:]
 
         return next(
                     (msg.content for msg in agent_response['messages'] if isinstance(msg, ToolMessage)),
@@ -428,7 +526,7 @@ def get_game_data_retriever(skip_populating=False):
     vector_store = Chroma(
         collection_name="game_data",
         embedding_function=embeddings,
-        persist_directory=f"./chroma_langchain_db",
+        persist_directory=f"./chroma_langchain_db/game_data",
     )
 
     if not skip_populating:
@@ -572,12 +670,15 @@ def create_and_save_review_summary_chain(llm):
         json.dump(chain_dict, f)
 
 @tool("get_user_recommendation")
-def get_user_recommendation(user_steamid: int):
+def get_user_recommendation(user_steamid: Annotated[int, InjectedToolArg]):
     """
     Returns personalized game recommendations based on a user's Steam ID.
-    """
-    #import pandas as pd
 
+    Examples:
+    1. Run this function if the user asks for recommendations for themselves or for
+    another user. Don't provide any arguments to this function.
+    """
+    print(f"RUNNING get_user_recommendation(user_steamid:{user_steamid}, {type(user_steamid)})")
     try:
         # Load pre calculated memory based data from CSVs
         user_item_matrix = pd.read_csv("../data/memory_based_user_item_matrix_1000_games.csv", index_col=0)
@@ -609,6 +710,7 @@ def get_user_recommendation(user_steamid: int):
             show_output=False,
             top_n=10
         )
+        print(f"recommendations:\n{recommendations}")
 
         if len(recommendations) == 0:
             return f"Sorry, no recommendations found for Steam user ID `{user_steamid}`."

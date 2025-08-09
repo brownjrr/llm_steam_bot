@@ -48,7 +48,7 @@ def layout():
                     'padding': 0
                 }
             ),
-            
+
             # Body
             dbc.Row(
                 [
@@ -86,6 +86,21 @@ def layout():
                     ),
                     dbc.Col(
                         [
+                            dbc.Row(
+                                html.Center(
+                                    [
+                                        html.Div([
+                                            html.Div("Steam User ID:", style={'fontWeight': 'bold', 'fontSize': 'large'}),
+                                            html.Div(id="user_id_display", style={'fontSize': 'large'}),
+                                        ], className="d-flex gap-1")
+                                    ],
+                                    # id="user_id_display", 
+                                    className="d-flex align-items-center justify-content-center"
+                                ),
+                                style={
+                                    'height': '5vh', 
+                                }
+                            ),
                             dbc.Container(
                                 [
                                     dbc.Row(
@@ -141,7 +156,8 @@ def layout():
                                 ],
                                 id="home-content",
                                 style={
-                                    'display': 'block'
+                                    'display': 'block',
+                                    'maxHeight': '80vh',
                                 }
                             ),
                             dbc.Container(
@@ -200,13 +216,10 @@ def layout():
                                                                             'enableClickSelection': True,
                                                                         },
                                                                     },
-                                                                    style={'height': '50vh'}
+                                                                    style={'height': '60vh'}
                                                                 ),
                                                             ),
                                                             dbc.Container(
-                                                                [
-                                                                    html.H1("Info Here")
-                                                                ],
                                                                 id="user_profile_table_info_area",
                                                                 style={'width': '33%', 'display': 'none'}
                                                             ),
