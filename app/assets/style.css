@@ -21,3 +21,8 @@
     font-weight: normal;
     white-space: nowrap;
 }
+
+.user_profile_table_img{
+    width: 150%;
+    height: 85%;
+}
