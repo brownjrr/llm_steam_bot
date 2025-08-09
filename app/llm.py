@@ -425,46 +425,6 @@ class ReviewSummary(BaseModel):
     other: Annotated[str, "A short summary of any other important important information offered by the reviews"]
     overall_sentiment: Annotated[str, "A short summary of the overall sentiment of the game"]
 
-def get_game_id_retriever(skip_populating=False):
-    print("Grabbing Game ID Retriever")
-
-    embeddings = HuggingFaceEmbeddings()
-
-    # defining vector store
-    vector_store = Chroma(
-        collection_name="game_appid",
-        embedding_function=embeddings,
-        persist_directory=f"./chroma_langchain_db/game_appid/",
-    )
-
-    if not skip_populating:
-        documents = []
-        df = pd.read_csv("../data/game_player_cnt_ranked_top_1k.csv")[['appid', 'name']]
-
-        # Create documents from game_data_list
-        for idx in range(df.shape[0]):
-            row = df.loc[idx]
-            content = f"appid: {row['appid']}\nname: '{row['name']}'"
-            meta_data = {'source': '../data/game_player_cnt_ranked_top_1k.csv', 'row': idx}
-
-            documents.append(
-                Document(
-                    page_content=content,
-                    id=idx,
-                    metadata=meta_data,
-                )
-            )
-        
-        # adding documents to vector store
-        uuids = [str(uuid.uuid4()) for _ in range(len(documents))]
-        vector_store.add_documents(documents=documents, ids=uuids)
-
-    retriever = vector_store.as_retriever()
-
-    print("Finished Grabbing Game ID Retriever")
-
-    return retriever
-
 def get_review_retriever(reviews, skip_populating=False, filter_app_id=None):
     print(f"Grabbing Review Retriever for App ID: {filter_app_id}")
 
