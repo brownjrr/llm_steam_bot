@@ -104,9 +104,9 @@ def add_ai_response_loading(user_prompt):
 def populate_ai_response_bubble(_, message_ids, user_prompt, userid):
     id = user_prompt['id']
     response = None
-    response = llm.invoke(userid, user_prompt['prompt'])
+    
     try:
-        # response = llm.invoke(userid, user_prompt['prompt'])
+        response = llm.invoke(userid, user_prompt['prompt'])
         pass
     except Exception as e:
         print(f"Error Encountered While Invoking LLM:\nError: {e}")
