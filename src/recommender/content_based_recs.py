@@ -12,7 +12,7 @@ def content_based_recommendation(appids, X, sim_df=None, similarity_method=None,
     if similarity_method is not None and similarity_method not in ['cosine']:
         assert False, "This function is not capable of handling this similarity method"
 
-    if sim_df is not None:
+    if sim_df is None:
         if similarity_method == 'cosine':
             sim_df = pd.DataFrame(cosine_similarity(X), columns=X.index, index=X.index)
     
@@ -49,6 +49,9 @@ def content_based_recommendation(appids, X, sim_df=None, similarity_method=None,
     app_rows = app_similarities[app_similarities['appid'].isin(appids)]
     app_similarities = app_similarities[~app_similarities['appid'].isin(appids)]
     if top_n is not None: app_similarities = app_similarities[:top_n]
+
+    if app_similarities['score'].isna().all():
+       app_similarities['score'] = len(app_similarities) - app_similarities.index
 
     return app_similarities
 

@@ -6,30 +6,28 @@ import re
 import json
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing import normalize
+from sklearn.decomposition import TruncatedSVD
 
 
-def process_game_data(game_df, details_df, img_summary_df=None, screenshot_summary_df=None, img_summary_df_v2=None, verbose=False, include_image_summary=False):
+def process_game_data(
+    game_df, details_df, img_summary_df=None, screenshot_summary_df=None, 
+    img_summary_df_v2=None, verbose=False, include_image_summary=False,
+    text_cols=None, numeric_cols=None, preprocess_text=True, normalize_numeric=True,
+    svd_k=100, svd_n_iter=10, tfidf_max_df=1.0, tfidf_min_df=1, tfidf_stop_words=None
+):
     # Merge game data with details
     game_df = game_df[['appid']]
-    game_df = game_df.merge(details_df, left_on='appid', right_on='appid', how='inner')
-
-    # filter out any records where type != 'game'
-    game_df = game_df[game_df['type']=='game']
-
-    # removing any games that haven't come out yet
-    game_df['coming_soon'] = game_df['release_date'].apply(lambda x: ast.literal_eval(x)['coming_soon'])
-    game_df = game_df[game_df['coming_soon']==False]
+    game_df = game_df.merge(details_df, left_on='appid', right_on='appid', how='left')
+    game_df = game_df.drop_duplicates(subset=['appid'])
 
     # creating release_year feature
     game_df['release_year'] = game_df['release_date'].apply(
         lambda x: pd.to_datetime(
-            ast.literal_eval(x)['date'], errors='coerce'
+            np.nan if not isinstance(x, str) and (x is None or np.isnan(x)) else ast.literal_eval(x)['date'], 
+            errors='coerce'
         ).year
     )
-
-    # dropping records with no release year
-    game_df = game_df.dropna(subset=['release_year'])
-
+    
     # processing recommendations column
     def process_recommendations(x):
         if not isinstance(x, str) and np.isnan(x):
@@ -37,6 +35,31 @@ def process_game_data(game_df, details_df, img_summary_df=None, screenshot_summa
         else:
             return ast.literal_eval(x)['total']
     game_df['recommendations'] = game_df['recommendations'].apply(process_recommendations)
+
+    # preprocessing metacritic column
+    def process_metacritic_score(x):
+        if isinstance(x, str):
+            score_dict = ast.literal_eval(x)
+            return float(score_dict['score'])
+        else:
+            return np.nan
+    game_df['metacritic'] = game_df['metacritic'].apply(process_metacritic_score)
+
+    # preprocessing dl column
+    def process_num_dlc(x):
+        if isinstance(x, str):
+            return len(ast.literal_eval(x))
+        else:
+            return 0
+    game_df['num_dlc'] = game_df['dlc'].apply(process_num_dlc)
+
+    # preprocessing dl column
+    def process_platforms(x):
+        if isinstance(x, str):
+            return " ".join(list(ast.literal_eval(x).keys()))
+        else:
+            return ""
+    game_df['platforms'] = game_df['platforms'].apply(process_platforms)
 
     # processing the developers column
     def process_developers(x):
@@ -101,7 +124,10 @@ def process_game_data(game_df, details_df, img_summary_df=None, screenshot_summa
     if img_summary_df_v2 is not None:
         # grabbing df with header image summary
         def process_header_images_v2(id):
-            summary = img_summary_df_v2[img_summary_df_v2['appid']==id]['image_keywords'].values[0]
+            try:
+                summary = img_summary_df_v2[img_summary_df_v2['appid']==id]['image_keywords'].values[0]
+            except IndexError:
+                summary = None
             return summary
         # processing header images
         game_df['header_image_summary'] = game_df['appid'].apply(process_header_images_v2)
@@ -109,36 +135,43 @@ def process_game_data(game_df, details_df, img_summary_df=None, screenshot_summa
     if screenshot_summary_df is not None:
         # grabbing df with header image summary
         def process_screenshots(id):
-            summary = screenshot_summary_df[screenshot_summary_df['appid']==id]['screenshot_summary'].values[0]
-            if summary is not None:
+            try:
+                summary = screenshot_summary_df[screenshot_summary_df['appid']==id]['screenshot_summary'].values[0]
+            except IndexError:
+                summary = None
+
+            if summary is not None and not isinstance(summary, type(np.nan)):
                 summary = " ".join(ast.literal_eval(summary))
             return summary
         # processing screenshots
         game_df['screenshot_summary'] = game_df['appid'].apply(process_screenshots)
 
-    text_cols = [
-        'name',
-        'about_the_game',
-        'developers',
-        'categories',
-        'genres',
-        'publishers',
-    ]
+    if text_cols is None:
+        text_cols = [
+            'name',
+            'about_the_game',
+            'developers',
+            'categories',
+            'genres',
+            'publishers',
+        ]
 
-    if include_image_summary or img_summary_df_v2 is not None: text_cols += ['header_image_summary']
-    if screenshot_summary_df is not None: text_cols += ['screenshot_summary']
+        if include_image_summary or img_summary_df_v2 is not None: text_cols += ['header_image_summary']
+        if screenshot_summary_df is not None: text_cols += ['screenshot_summary']
 
-    numeric_cols = [
-        'is_free',
-        # 'ratings', # FIXME: handling this requires some thought. Exclude for now
-        'recommendations',
-        'required_age',
-        'release_year'
-    ]
+    if numeric_cols is None:
+        numeric_cols = [
+            'is_free',
+            # 'ratings', # FIXME: handling this requires some thought. Exclude for now
+            'recommendations',
+            'required_age',
+            'release_year',
+            'metacritic',
+        ]
 
     def preprocess_text_column(x):
         # impute missing data
-        x = "" if x is None else x
+        x = "" if x is None or isinstance(x, type(np.nan)) else x
 
         # cast to lowercase
         try:
@@ -152,31 +185,52 @@ def process_game_data(game_df, details_df, img_summary_df=None, screenshot_summa
 
         return x
 
-    # clean text columns
-    for col in text_cols:
-        game_df[col] = game_df[col].apply(preprocess_text_column)
+    if preprocess_text:
+        # clean text columns
+        for col in text_cols:
+            game_df[col] = game_df[col].apply(preprocess_text_column)
 
-    # combine text columns
-    game_df['text'] = game_df[text_cols[0]]
-    for col in text_cols[1:]:
-        game_df['text'] += " " + game_df[col]
+    if text_cols is not None and preprocess_text:
+        # combine text columns
+        game_df['text'] = game_df[text_cols[0]]
+        for col in text_cols[1:]:
+            game_df['text'] += " " + game_df[col]
 
-    # vectorize text column
-    vectorizer = TfidfVectorizer()
-    text_vec_df = pd.DataFrame(vectorizer.fit_transform(game_df['text']).toarray())
+        # vectorize text column
+        vectorizer = TfidfVectorizer(max_df=tfidf_max_df, min_df=tfidf_min_df, stop_words=tfidf_stop_words)
+        text_vec_df = pd.DataFrame(vectorizer.fit_transform(game_df['text']).toarray())
+
+        # 2. Truncated SVD to k dimensions
+        svd = TruncatedSVD(n_components=svd_k, n_iter=svd_n_iter, random_state=42)
+        text_vec_df = pd.DataFrame(svd.fit_transform(text_vec_df))  # item embeddings
 
     # create df from numeric cols
     num_df = game_df[['appid']+numeric_cols].fillna(0).set_index("appid")
 
-    num_df['is_free'] = num_df['is_free'].astype(int)
-    num_df = pd.DataFrame(normalize(num_df), columns=num_df.columns, index=num_df.index)
+    if 'is_free' in numeric_cols: num_df['is_free'] = num_df['is_free'].astype(int)
 
-    # concatenate text_vec_df with numeric cols
-    final_game_df = pd.DataFrame(
-        data=np.hstack([num_df, text_vec_df]),
-        columns=numeric_cols+list(text_vec_df.columns),
-        index=num_df.index
-    )
+    if normalize_numeric:
+        num_df = pd.DataFrame(normalize(num_df), columns=num_df.columns, index=num_df.index)
+
+    if preprocess_text:
+        # concatenate text_vec_df with numeric cols
+        final_game_df = pd.DataFrame(
+            data=np.hstack([num_df, text_vec_df]),
+            columns=numeric_cols+list(text_vec_df.columns),
+            index=num_df.index
+        )
+    else:
+        game_df['text'] = game_df[[i for i in text_cols if i != "name"]].replace(np.nan, None).apply(
+            lambda row: " ".join([i if i is not None else "" for i in row.values]), 
+            axis=1
+        ).to_frame()
+
+        # concatenate text_vec_df with numeric cols
+        final_game_df = pd.DataFrame(
+            data=np.hstack([num_df, game_df[['name', 'text']]]),
+            columns=numeric_cols+['name', 'text'],
+            index=num_df.index
+        )
     
     if verbose:
         print(final_game_df)
@@ -247,30 +301,3 @@ if __name__ == "__main__":
         include_image_summary=False,
         verbose=True, 
     )
-
-    """Processing Top 1000 Games Data"""
-    # # get app ids
-    # df = pd.read_csv("../../data/game_player_cnt_ranked_top_1k.csv")
-    # app_list = df['appid'].tolist()
-    # df = json_to_df(app_list)
-
-    # df.to_csv("../../data/top_1000_game_details.csv", index=False)
-
-    # game_df = pd.read_csv("../../data/top_1000_games.csv")
-    # game_details_df = pd.read_csv("../../data/top_1000_game_details.csv")
-    # process_game_data(game_df, game_details_df)
-
-    """Processing Game Data"""
-    # game_df = pd.read_csv("../../data/raw_game_data.csv")
-    # game_details_df = pd.read_csv("../../data/game_details_sample.csv")
-    # process_game_data(game_df, game_details_df)
-
-    
-    """(TESTING) Counting the number of files in each folder"""
-    # successful = glob.glob("../../data/successful_requests/*")
-    # failed = glob.glob("../../data/failed_requests/*")
-    # no_data = glob.glob("../../data/no_data_requests/*")
-
-    # print(f"successful: {len(successful)}")
-    # print(f"failed: {len(failed)}")
-    # print(f"no_data: {len(no_data)}")
