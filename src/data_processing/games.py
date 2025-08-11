@@ -20,13 +20,6 @@ def process_game_data(
     game_df = game_df.merge(details_df, left_on='appid', right_on='appid', how='left')
     game_df = game_df.drop_duplicates(subset=['appid'])
 
-    # # filter out any records where type != 'game'
-    # game_df = game_df[game_df['type']=='game']
-
-    # removing any games that haven't come out yet
-    # game_df['coming_soon'] = game_df['release_date'].apply(lambda x: ast.literal_eval(x)['coming_soon'])
-    # game_df = game_df[game_df['coming_soon']==False]
-
     # creating release_year feature
     game_df['release_year'] = game_df['release_date'].apply(
         lambda x: pd.to_datetime(
@@ -35,9 +28,6 @@ def process_game_data(
         ).year
     )
     
-    # # dropping records with no release year
-    # game_df = game_df.dropna(subset=['release_year'])
-
     # processing recommendations column
     def process_recommendations(x):
         if not isinstance(x, str) and np.isnan(x):
@@ -311,30 +301,3 @@ if __name__ == "__main__":
         include_image_summary=False,
         verbose=True, 
     )
-
-    """Processing Top 1000 Games Data"""
-    # # get app ids
-    # df = pd.read_csv("../../data/game_player_cnt_ranked_top_1k.csv")
-    # app_list = df['appid'].tolist()
-    # df = json_to_df(app_list)
-
-    # df.to_csv("../../data/top_1000_game_details.csv", index=False)
-
-    # game_df = pd.read_csv("../../data/top_1000_games.csv")
-    # game_details_df = pd.read_csv("../../data/top_1000_game_details.csv")
-    # process_game_data(game_df, game_details_df)
-
-    """Processing Game Data"""
-    # game_df = pd.read_csv("../../data/raw_game_data.csv")
-    # game_details_df = pd.read_csv("../../data/game_details_sample.csv")
-    # process_game_data(game_df, game_details_df)
-
-    
-    """(TESTING) Counting the number of files in each folder"""
-    # successful = glob.glob("../../data/successful_requests/*")
-    # failed = glob.glob("../../data/failed_requests/*")
-    # no_data = glob.glob("../../data/no_data_requests/*")
-
-    # print(f"successful: {len(successful)}")
-    # print(f"failed: {len(failed)}")
-    # print(f"no_data: {len(no_data)}")
