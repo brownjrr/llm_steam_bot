@@ -98,7 +98,7 @@ def get_reviews(app_id=None):
 
     return [(i[0], i[1]) for i in df[['appid', 'review']].values]
 
-def get_model():
+def get_model(temp=None, top_p=None):
     print("Grabbing Model")
 
     # creating model
@@ -134,7 +134,7 @@ def summarize_reviews(appid, llm):
         
         return ret_str
     
-    retriever = get_review_retriever(get_reviews(), skip_populating=True, filter_app_id=str(appid))
+    retriever = get_review_retriever(skip_populating=True, filter_app_id=str(appid))
 
     chain = {"context": retriever, "question": RunnablePassthrough()} | prompt | llm.with_structured_output(GameReviewSummary) | RunnableLambda(process_game_summary_review)
 
@@ -425,6 +425,7 @@ class ReviewSummary(BaseModel):
     other: Annotated[str, "A short summary of any other important important information offered by the reviews"]
     overall_sentiment: Annotated[str, "A short summary of the overall sentiment of the game"]
 
+
 def get_review_retriever(reviews, skip_populating=False, filter_app_id=None):
     print(f"Grabbing Review Retriever for App ID: {filter_app_id}")
 
@@ -621,7 +622,7 @@ def create_and_save_review_summary_chain(llm):
         sent = sentence.content.strip()
         return ast.literal_eval(sent)
     
-    chain = {"context": get_review_retriever(get_reviews(), skip_populating=True), "question": RunnablePassthrough()} | prompt | llm | RunnableLambda(convert_to_json)
+    chain = {"context": get_review_retriever(skip_populating=True), "question": RunnablePassthrough()} | prompt | llm | RunnableLambda(convert_to_json)
 
     # saving chain
     chain_dict = dumpd(chain)

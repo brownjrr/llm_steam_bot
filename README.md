@@ -30,6 +30,20 @@ aws configure set default.region us-east-1
 
 ---
 
+## 3. Clone the Repo
+
+Clone the repo by opening your terminal and pasting this git command
+```bash
+git clone https://github.com/brownjrr/llm_steam_bot.git
+```
+
+Then you can ensure large files from github lfs are downloaded with
+```bash
+git lfs pull
+```
+
+---
+
 ## 3. Pip install the Requirements
 
 we first recommend you use a virtual environment to seperate this projects requirements from any other ones that may already be installed
