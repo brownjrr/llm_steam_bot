@@ -19,8 +19,8 @@ app.layout = layout
 app.title = "Steam Bot"
 
 if __name__ == '__main__':
-    # if os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
-    #     webbrowser.open_new('http://127.0.0.1:8050/')
+    if os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+        webbrowser.open_new('http://127.0.0.1:8050/')
     app.run(
         debug=True,
         dev_tools_prune_errors=False
