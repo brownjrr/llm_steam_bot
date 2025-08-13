@@ -23,7 +23,7 @@ def layout():
                         [
                             dbc.Col(dbc.Label("Steam Bot", className="header_title_text")),
                             dbc.Col(
-                                dbc.Button("About", id="about_app_button", className="header_about_text", color=None),
+                                # dbc.Button("About", id="about_app_button", className="header_about_text", color=None),
                                 width=1,
                                 style={
                                     'justify-content': 'center'
@@ -132,7 +132,7 @@ def layout():
                                                     [
                                                         dbc.Input(
                                                             id="user-prompt-input",
-                                                            placeholder="A large input...", 
+                                                            placeholder="Ask about games or ask for recommendations...", 
                                                             size="lg", 
                                                             style={
                                                                 'maxHeight': '80%'
