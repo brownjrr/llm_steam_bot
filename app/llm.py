@@ -308,7 +308,7 @@ class SteamBotModel():
         print(f"response:\n{response}")
         
         # Error Handling: Could Not Find Game(s)
-        if isinstance(response, list) and len(response)>=1 and all([i == GAME_NOT_FOUND_STR for i in response]):
+        if isinstance(response, list) and len(response)>=1 and (all([i == GAME_NOT_FOUND_STR for i in response]) or all([i['appid'] is None for i in response if 'appid' in i])):
             similar_game_chain = (
                 {"context": retriever, "game": RunnablePassthrough()}
                 | ChatPromptTemplate.from_template(
@@ -426,7 +426,7 @@ class ReviewSummary(BaseModel):
     overall_sentiment: Annotated[str, "A short summary of the overall sentiment of the game"]
 
 
-def get_review_retriever(reviews, skip_populating=False, filter_app_id=None):
+def get_review_retriever(reviews=None, skip_populating=False, filter_app_id=None):
     print(f"Grabbing Review Retriever for App ID: {filter_app_id}")
 
     embeddings = HuggingFaceEmbeddings()
