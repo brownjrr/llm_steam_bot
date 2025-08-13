@@ -30,7 +30,8 @@ sys.path.append("../src/data_processing/")
 sys.path.append("../src/recommender/")
 
 from games import process_game_data
-from collaborative_memory_based import recommend_games_for_user 
+#from collaborative_memory_based import recommend_games_for_user 
+df_memory_based_recommendations = pd.read_csv("../data/df_memory_based_recommendations.csv")
 
 GAME_NOT_FOUND_STR = "<GAME_NOT_FOUND>"
 
@@ -103,9 +104,8 @@ def get_model(temp=None, top_p=None):
 
     # creating model
     llm = ChatBedrockConverse(
-        # model="us.meta.llama3-1-70b-instruct-v1:0", region_name="us-east-1"
-        model="us.meta.llama4-maverick-17b-instruct-v1:0",
-        region_name="us-east-1"
+        #model="us.meta.llama3-1-70b-instruct-v1:0", region_name="us-east-1"
+        model="us.meta.llama4-maverick-17b-instruct-v1:0", region_name="us-east-1"
     )
 
     return llm
@@ -641,37 +641,7 @@ def get_user_recommendation(user_steamid: Annotated[int, InjectedToolArg]):
     """
     print(f"RUNNING get_user_recommendation(user_steamid:{user_steamid}, {type(user_steamid)})")
     try:
-        # Load pre calculated memory based data from CSVs
-        user_item_matrix = pd.read_csv("../data/memory_based_user_item_matrix_1000_games.csv", index_col=0)
-        item_similarity_df = pd.read_csv("../data/df_memory_based_item_similarity_1000_games.csv", index_col=0)
-        interaction_df = pd.read_csv("../data/df_memory_based_interaction_1000_games.csv")
-        df_top_n_game_details = pd.read_csv("../data/top_1000_game_details.csv")
-        df_users_owned_games = pd.read_csv("../data/df_users_owned_games.csv")
-
-        # format issues
-        if user_item_matrix.index.dtype in ['float64', 'float32']:
-            user_item_matrix.index = user_item_matrix.index.astype("int64")
-        if user_item_matrix.columns.dtype in ['float64', 'float32']:
-            user_item_matrix.columns = user_item_matrix.columns.astype("int64")
-        if item_similarity_df.index.dtype in ['float64', 'float32']:
-            item_similarity_df.index = item_similarity_df.index.astype("int64")
-        if item_similarity_df.columns.dtype in ['float64', 'float32']:
-            item_similarity_df.columns = item_similarity_df.columns.astype("int64")
-        item_similarity_df.columns = item_similarity_df.columns.astype(int)
-        item_similarity_df.index = item_similarity_df.index.astype(int)
-
-        # Call recommender function
-        recommendations = recommend_games_for_user(
-            user_id=user_steamid,
-            interaction=interaction_df,
-            user_item_matrix=user_item_matrix,
-            item_similarity_df=item_similarity_df,
-            df_top_n_game_details=df_top_n_game_details,
-            df_users_owned_games=df_users_owned_games,
-            show_output=False,
-            top_n=10
-        )
-        print(f"recommendations:\n{recommendations}")
+        recommendations = df_memory_based_recommendations[df_memory_based_recommendations['user_id']==user_steamid]
 
         if len(recommendations) == 0:
             return f"Sorry, no recommendations found for Steam user ID `{user_steamid}`."
