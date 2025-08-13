@@ -89,4 +89,7 @@ And that's it! You can now interact with the application and ask it questions ab
 * "Tell me more about the reception of Left 4 Dead 2."
 
 Or ask for some game recommendations with a prompt such as:
-* Give me some recommendations for a game similar to Apex Legends
+* Give me some recommendations for a game similar to Counter-Strike 2
+
+Or ask for some game recommendations for a specific user with a prompt such as:
+* Recommend me games for the profile 76561198164574454
