@@ -1,7 +1,7 @@
 # llm_steam_bot
 Created by Robert Brown, Ryan Obear, and Lucas Marra
 
-# Data Access Statement
+## Data Access Statement
 This project will use LLMs to create a chatbot capable of answering specific questions about Steam games.
 The data was accessed using Steam's Web API and the terms of use can be found here: https://steamcommunity.com/dev/apiterms.
 Please respect their License and Agreement found there.
